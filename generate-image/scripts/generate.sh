@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+# generate.sh — entry point for the generate-image skill.
+# Reads /home/owner/.carbon/config.yaml, picks the provider, dispatches.
+#
+# Usage:
+#   generate.sh "<prompt>" [--quality LEVEL] [--output PATH] [--size WxH]
+#
+# Exit codes:
+#   0  success — final line of stdout is the absolute output path
+#   1  usage error / config missing / API failure
+#   2  active provider is anthropic (no image generation API)
+
+set -eu
+
+CONFIG_FILE="${CARBON_CONFIG:-/home/owner/.carbon/config.yaml}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=parse_yaml.sh
+. "$SCRIPT_DIR/parse_yaml.sh"
+
+PROMPT=""
+QUALITY=""
+OUTPUT=""
+SIZE="1024x1024"
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --quality) QUALITY="${2:-}"; shift 2 ;;
+        --output)  OUTPUT="${2:-}";  shift 2 ;;
+        --size)    SIZE="${2:-}";    shift 2 ;;
+        --help|-h)
+            sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+            exit 0
+            ;;
+        --) shift; PROMPT="${1:-$PROMPT}"; shift || true ;;
+        -*) echo "generate.sh: unknown flag: $1" >&2; exit 1 ;;
+        *)  PROMPT="$1"; shift ;;
+    esac
+done
+
+if [ -z "$PROMPT" ]; then
+    echo "generate.sh: prompt is required" >&2
+    echo "Usage: generate.sh \"<prompt>\" [--quality LEVEL] [--output PATH] [--size WxH]" >&2
+    exit 1
+fi
+
+if [ ! -r "$CONFIG_FILE" ]; then
+    echo "generate.sh: cannot read config at $CONFIG_FILE" >&2
+    echo "Set CARBON_CONFIG to override the path, or create the file." >&2
+    exit 1
+fi
+
+PROVIDER="$(get_yaml_field provider "$CONFIG_FILE" || true)"
+MODEL="$(get_yaml_field model "$CONFIG_FILE" || true)"
+
+if [ -z "$PROVIDER" ]; then
+    echo "generate.sh: 'provider:' field missing from $CONFIG_FILE" >&2
+    exit 1
+fi
+if [ -z "$MODEL" ]; then
+    echo "generate.sh: 'model:' field missing from $CONFIG_FILE" >&2
+    exit 1
+fi
+
+if [ -z "$OUTPUT" ]; then
+    OUTPUT="./image_$(date +%Y%m%d_%H%M%S).png"
+fi
+
+case "$PROVIDER" in
+    anthropic)
+        cat >&2 <<EOF
+generate.sh: provider 'anthropic' does not support image generation.
+Anthropic's Claude models can analyze images but cannot create them.
+Edit $CONFIG_FILE and set 'provider:' to 'openai' or 'gemini',
+then point 'model:' at an image-capable model (e.g. gpt-image-1, imagen-4.0-generate-001).
+EOF
+        exit 2
+        ;;
+    openai)
+        exec bash "$SCRIPT_DIR/openai_generate.sh" \
+            --config "$CONFIG_FILE" \
+            --model  "$MODEL" \
+            --quality "$QUALITY" \
+            --size   "$SIZE" \
+            --output "$OUTPUT" \
+            -- "$PROMPT"
+        ;;
+    gemini|google)
+        exec bash "$SCRIPT_DIR/gemini_generate.sh" \
+            --config "$CONFIG_FILE" \
+            --model  "$MODEL" \
+            --quality "$QUALITY" \
+            --size   "$SIZE" \
+            --output "$OUTPUT" \
+            -- "$PROMPT"
+        ;;
+    *)
+        echo "generate.sh: unknown provider '$PROVIDER' (expected openai, gemini, or anthropic)" >&2
+        exit 1
+        ;;
+esac
