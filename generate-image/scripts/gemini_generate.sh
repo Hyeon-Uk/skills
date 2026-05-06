@@ -27,11 +27,15 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-API_KEY="$(get_yaml_nested gemini api_key "$CONFIG_FILE")"
+API_KEY="$(get_yaml_nested3 providers gemini api_key "$CONFIG_FILE")"
 if [ -z "$API_KEY" ]; then
-    echo "gemini_generate.sh: gemini.api_key not found in $CONFIG_FILE" >&2
+    echo "gemini_generate.sh: providers.gemini.api_key not found in $CONFIG_FILE" >&2
     exit 1
 fi
+
+BASE_URL="$(get_yaml_nested3 providers gemini base_url "$CONFIG_FILE" || true)"
+[ -z "$BASE_URL" ] && BASE_URL="https://generativelanguage.googleapis.com"
+BASE_URL="${BASE_URL%/}"
 
 # Map WxH to Imagen aspect ratio. Only the ratio matters; pixel dims are ignored.
 ASPECT="1:1"
@@ -72,7 +76,7 @@ case "$MODEL" in
         cat > "$REQUEST_FILE" <<EOF
 {"instances":[{"prompt":"$ESCAPED_PROMPT"}],"parameters":{"sampleCount":1,"aspectRatio":"$ASPECT"$IMAGE_SIZE_FIELD}}
 EOF
-        ENDPOINT="https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:predict"
+        ENDPOINT="$BASE_URL/v1beta/models/${MODEL}:predict"
         RESPONSE_KEY="bytesBase64Encoded"
         ;;
     *)
@@ -81,7 +85,7 @@ EOF
         cat > "$REQUEST_FILE" <<EOF
 {"contents":[{"parts":[{"text":"$ESCAPED_PROMPT"}]}],"generationConfig":{"responseModalities":["IMAGE"]}}
 EOF
-        ENDPOINT="https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent"
+        ENDPOINT="$BASE_URL/v1beta/models/${MODEL}:generateContent"
         RESPONSE_KEY="data"
         ;;
 esac
@@ -91,7 +95,7 @@ HTTP_CODE="$(curl -sS -w '%{http_code}' -o "$RESPONSE_FILE" \
     -H "x-goog-api-key: $API_KEY" \
     -H "Content-Type: application/json" \
     --data-binary @"$REQUEST_FILE")" || {
-    echo "gemini_generate.sh: curl failed talking to generativelanguage.googleapis.com" >&2
+    echo "gemini_generate.sh: curl failed talking to $BASE_URL" >&2
     exit 1
 }
 

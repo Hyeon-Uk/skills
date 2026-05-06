@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 # generate.sh — entry point for the generate-image skill.
-# Reads /home/owner/.carbon/config.yaml, picks the provider, dispatches.
+# Reads /home/owner/.carbon/config.yaml, picks the provider from
+# defaults.provider, and dispatches.
+#
+# The carbon config does NOT carry an image model — it tracks the user's
+# chat-tier choice (e.g. defaults.model: light). Image model defaults are
+# baked into this script per-provider; the user can override with --model.
 #
 # Usage:
-#   generate.sh "<prompt>" [--quality LEVEL] [--output PATH] [--size WxH]
+#   generate.sh "<prompt>" [--model NAME] [--quality LEVEL]
+#                          [--output PATH] [--size WxH]
 #
 # Exit codes:
 #   0  success — final line of stdout is the absolute output path
@@ -18,17 +24,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/parse_yaml.sh"
 
 PROMPT=""
+MODEL=""
 QUALITY=""
 OUTPUT=""
 SIZE="1024x1024"
 
 while [ $# -gt 0 ]; do
     case "$1" in
+        --model)   MODEL="${2:-}";   shift 2 ;;
         --quality) QUALITY="${2:-}"; shift 2 ;;
         --output)  OUTPUT="${2:-}";  shift 2 ;;
         --size)    SIZE="${2:-}";    shift 2 ;;
         --help|-h)
-            sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         --) shift; PROMPT="${1:-$PROMPT}"; shift || true ;;
@@ -39,7 +47,7 @@ done
 
 if [ -z "$PROMPT" ]; then
     echo "generate.sh: prompt is required" >&2
-    echo "Usage: generate.sh \"<prompt>\" [--quality LEVEL] [--output PATH] [--size WxH]" >&2
+    echo "Usage: generate.sh \"<prompt>\" [--model NAME] [--quality LEVEL] [--output PATH] [--size WxH]" >&2
     exit 1
 fi
 
@@ -49,16 +57,21 @@ if [ ! -r "$CONFIG_FILE" ]; then
     exit 1
 fi
 
-PROVIDER="$(get_yaml_field provider "$CONFIG_FILE" || true)"
-MODEL="$(get_yaml_field model "$CONFIG_FILE" || true)"
-
+PROVIDER="$(get_yaml_nested defaults provider "$CONFIG_FILE" || true)"
 if [ -z "$PROVIDER" ]; then
-    echo "generate.sh: 'provider:' field missing from $CONFIG_FILE" >&2
+    echo "generate.sh: 'defaults.provider' missing from $CONFIG_FILE" >&2
     exit 1
 fi
+
+# Pick a sensible image-generation model when the user did not pass --model.
+# These are not in the config; the config tracks the chat-tier model only.
 if [ -z "$MODEL" ]; then
-    echo "generate.sh: 'model:' field missing from $CONFIG_FILE" >&2
-    exit 1
+    case "$PROVIDER" in
+        openai)        MODEL="gpt-image-1" ;;
+        gemini|google) MODEL="imagen-4.0-generate-001" ;;
+        anthropic)     MODEL="" ;;  # unused; anthropic is rejected below
+        *)             MODEL="" ;;
+    esac
 fi
 
 if [ -z "$OUTPUT" ]; then
@@ -70,8 +83,9 @@ case "$PROVIDER" in
         cat >&2 <<EOF
 generate.sh: provider 'anthropic' does not support image generation.
 Anthropic's Claude models can analyze images but cannot create them.
-Edit $CONFIG_FILE and set 'provider:' to 'openai' or 'gemini',
-then point 'model:' at an image-capable model (e.g. gpt-image-1, imagen-4.0-generate-001).
+Edit $CONFIG_FILE and set 'defaults.provider:' to 'openai' or 'gemini'.
+Image-capable defaults: gpt-image-1 (openai), imagen-4.0-generate-001 (gemini).
+Override the model per-call with --model if you want a different one.
 EOF
         exit 2
         ;;
