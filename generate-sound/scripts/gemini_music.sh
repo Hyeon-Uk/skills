@@ -71,18 +71,30 @@ RESPONSE_FILE="$(mktemp)"
 trap 'rm -f "$REQUEST_FILE" "$RESPONSE_FILE"' EXIT
 
 cat > "$REQUEST_FILE" <<EOF
-{"contents":[{"parts":[{"text":"$ESCAPED_PROMPT"}]}],"generationConfig":{"responseModalities":["AUDIO"],"responseMimeType":"$MIME"}}
+{"contents":[{"parts":[{"text":"$ESCAPED_PROMPT"}]}],"generationConfig":{"responseModalities":["AUDIO"]}}
 EOF
 
-ENDPOINT="$BASE_URL/v1beta/models/${MODEL}:generateContent"
+ENDPOINT="https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent"
 
-HTTP_CODE="$(curl -sS -w '%{http_code}' -o "$RESPONSE_FILE" \
-    "$ENDPOINT" \
+# HTTP_CODE="$(curl -sS -w '%{http_code}' -o "$RESPONSE_FILE" \
+#     "$ENDPOINT" \
+#     -H "x-goog-api-key: $API_KEY" \
+#     -H "Content-Type: application/json" \
+#     --data-binary @"$REQUEST_FILE")" || {
+#     echo "gemini_music.sh: curl failed talking to $BASE_URL" >&2
+#     exit 1
+# }
+
+HTTP_CODE=$(curl -sS \
+    -o "$RESPONSE_FILE" \
+    -w "%{http_code}" \
+    -X POST "$ENDPOINT" \
     -H "x-goog-api-key: $API_KEY" \
     -H "Content-Type: application/json" \
-    --data-binary @"$REQUEST_FILE")" || {
+    --data @"$REQUEST_FILE"
+) || {
     echo "gemini_music.sh: curl failed talking to $BASE_URL" >&2
-    exit 1
+    exit 1    
 }
 
 if [ "$HTTP_CODE" != "200" ]; then
