@@ -11,7 +11,7 @@ Generates an audio file from a text input — either a music clip or spoken spee
 
 The skill picks the provider based on the request type, so the required key depends on what the user asked for:
 
-- **Music** requests always use `gemini` → `providers.gemini.api_key` must be a valid Google AI Studio key (`AIza...`)
+- **Music** requests always use `gemini` → `providers.gemini.api_key` must be a valid Google AI Studio key (`AIza...`). If this key is missing, the skill exits with an error — there is no fallback for music since no other provider supports it.
 - **Speech** requests use `defaults.provider`; if that's `anthropic`, the skill falls back to `gemini` first, then `openai`
 
 Have both `providers.openai.api_key` and `providers.gemini.api_key` set for full coverage. If the required key is missing or empty, the provider script exits non-zero with a message naming the missing field. Do not retry — ask the user to set the key first.
