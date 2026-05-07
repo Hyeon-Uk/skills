@@ -1,11 +1,20 @@
 ---
 name: generate-image
-description: Generates images via OpenAI (DALL-E, gpt-image-1) or Google Gemini (Imagen, Gemini image models). Reads the active provider and API key from `/home/owner/.carbon/config.yaml` (`defaults.provider` + `providers.<name>.api_key` + optional `providers.<name>.base_url`). Image-generation models are NOT in the carbon config — the skill picks a sensible default per provider (`gpt-image-1` for openai, `imagen-4.0-generate-001` for gemini) and accepts `--model` to override. Built for embedded Linux — pure shell + curl, no Python or Node required. Use this skill whenever the user asks to create, generate, draw, render, or make an image; whenever they mention DALL-E, Imagen, gpt-image, or text-to-image; whenever they reference the Carbon config or want to use their currently configured provider — even if they don't explicitly say "use the skill". If the active provider is `anthropic`, this skill returns a clear error explaining that Anthropic does not offer an image generation API.
+description: Generates images via OpenAI (DALL-E, gpt-image-1) or Google Gemini (Imagen, Gemini image models). Reads the active provider and API key from `/home/owner/.carbon/config.yaml` (`defaults.provider` + `providers.<name>.api_key`). Each provider script talks to the official endpoint for that provider — `https://api.openai.com` for OpenAI, `https://generativelanguage.googleapis.com` for Gemini — and does NOT honor a `base_url` override. Image-generation models are NOT in the carbon config — the skill picks a sensible default per provider (`gpt-image-1` for openai, `imagen-4.0-generate-001` for gemini) and accepts `--model` to override. Built for embedded Linux — pure shell + curl, no Python or Node required. **Prerequisite**: `providers.<active-provider>.api_key` MUST be set in `config.yaml` before this skill is invoked; the script exits non-zero with a clear message otherwise. Use this skill whenever the user asks to create, generate, draw, render, or make an image; whenever they mention DALL-E, Imagen, gpt-image, or text-to-image; whenever they reference the Carbon config or want to use their currently configured provider — even if they don't explicitly say "use the skill". If the active provider is `anthropic`, this skill returns a clear error explaining that Anthropic does not offer an image generation API.
 ---
 
 # generate-image
 
 Generates an image from a text prompt using whichever provider is active in `/home/owner/.carbon/config.yaml`.
+
+## Prerequisite — API key must be configured
+
+Before this skill can run, the active provider's API key MUST exist in `config.yaml`:
+
+- `defaults.provider: openai` → `providers.openai.api_key` must be a valid OpenAI key (`sk-...`)
+- `defaults.provider: gemini` → `providers.gemini.api_key` must be a valid Google AI Studio key (`AIza...`)
+
+If the key is missing or empty, the provider script exits non-zero with a message naming the missing field and the path of the config file. Do not retry — ask the user to set the key first. The skill never falls back to another provider's key.
 
 ## When to use this skill
 
@@ -22,8 +31,8 @@ If the user names a provider explicitly ("use OpenAI to..."), still defer to the
 The skill is a thin wrapper around three shell scripts in `scripts/`:
 
 - `generate.sh` — entry point. Reads the config, picks the model default for the active provider, dispatches.
-- `openai_generate.sh` — calls `<base_url>/v1/images/generations` (default `base_url`: `https://api.openai.com`).
-- `gemini_generate.sh` — calls `<base_url>/v1beta/models/...` on Imagen `:predict` or Gemini `:generateContent` (default: `https://generativelanguage.googleapis.com`).
+- `openai_generate.sh` — calls `https://api.openai.com/v1/images/generations` (endpoint is hardcoded; no override).
+- `gemini_generate.sh` — calls `https://generativelanguage.googleapis.com/v1beta/models/...` on Imagen `:predict` or Gemini `:generateContent` (endpoint is hardcoded; no override).
 - `parse_yaml.sh` — minimal YAML reader (top-level + 2-level + 3-level nesting). Used because the embedded environment lacks `yq` / `python` / `node`.
 
 All three are POSIX-friendly bash. JSON parsing uses `sed` rather than `jq` so the skill works on stripped-down embedded systems where `jq` is not installed.
@@ -81,22 +90,18 @@ defaults:
 
 providers:
   openai:
-    api_key: "sk-..."       # required
-    base_url: ""            # optional override; empty → api.openai.com
+    api_key: "sk-..."       # REQUIRED — skill refuses to run without it
   gemini:
-    api_key: "AIza-..."
-    base_url: ""            # optional; empty → generativelanguage.googleapis.com
+    api_key: "AIza-..."     # REQUIRED — skill refuses to run without it
   anthropic:
-    api_key: "sk-ant-..."
-    base_url: ""
+    api_key: "sk-ant-..."   # not used (anthropic has no image API)
 ```
 
 The skill reads:
 - `defaults.provider` — for routing
-- `providers.<defaults.provider>.api_key` — for auth
-- `providers.<defaults.provider>.base_url` — used as the API root if non-empty (handy for LiteLLM proxies, internal gateways)
+- `providers.<defaults.provider>.api_key` — for auth (mandatory)
 
-It deliberately **does not** read `defaults.model` — that field is for chat models in carbon's normal flow, not for image generation.
+It deliberately **does not** read `defaults.model` (that's the chat tier in carbon's normal flow) and it deliberately **does not** read any `base_url` field — each provider script targets that provider's official endpoint and that endpoint only.
 
 ## Provider routing
 
@@ -114,8 +119,8 @@ After success, tell the user the absolute path of the saved image and the model 
 
 - **Prompt contains quotes or newlines.** Pass the prompt as a single argument; the scripts JSON-escape it internally. Don't pre-escape.
 - **`config.yaml` missing or unreadable.** Script exits non-zero with the path it tried. Tell the user where to put the file.
-- **`providers.<name>.api_key` empty.** Script exits non-zero. Don't fall back to a different provider unless the user asks.
-- **`base_url` set to a custom proxy.** The script appends the standard path (`/v1/images/generations` or `/v1beta/models/...`) to whatever `base_url` is set, after stripping any trailing slash. If your proxy uses a different path layout, the request will fail — tell the user.
+- **`providers.<name>.api_key` empty.** Script exits non-zero with the field name. This is the single most common failure — surface the message verbatim and stop. Don't fall back to a different provider unless the user asks.
+- **Custom proxy / gateway.** Not supported. Each provider script hits the official endpoint (`api.openai.com`, `generativelanguage.googleapis.com`) and ignores any `base_url` field in `config.yaml`. If the user needs a proxy, they have to fork the script and change the URL.
 - **`--model` doesn't match the active provider.** E.g., `defaults.provider: openai` with `--model imagen-3.0-generate-002`. The script trusts the inputs and sends the request; the API will reject it. Suggest fixing one or the other rather than guessing.
 - **Output path's parent directory doesn't exist.** The script will fail when writing. Create the directory first if the user asked for a nested path.
 

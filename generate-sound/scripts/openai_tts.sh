@@ -32,12 +32,13 @@ done
 API_KEY="$(get_yaml_nested3 providers openai api_key "$CONFIG_FILE")"
 if [ -z "$API_KEY" ]; then
     echo "openai_tts.sh: providers.openai.api_key not found in $CONFIG_FILE" >&2
+    echo "Set providers.openai.api_key in $CONFIG_FILE before invoking this skill." >&2
     exit 1
 fi
 
-BASE_URL="$(get_yaml_nested3 providers openai base_url "$CONFIG_FILE" || true)"
-[ -z "$BASE_URL" ] && BASE_URL="https://api.openai.com"
-BASE_URL="${BASE_URL%/}"
+# OpenAI TTS always uses the official endpoint.
+# https://platform.openai.com/docs/api-reference/audio/createSpeech
+BASE_URL="https://api.openai.com"
 
 [ -z "$VOICE" ] && VOICE="alloy"
 

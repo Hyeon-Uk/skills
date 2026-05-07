@@ -1,11 +1,20 @@
 ---
 name: generate-sound
-description: Generates audio from text — either music (Google Gemini Lyria 3) or speech (OpenAI TTS, Gemini TTS). Reads the active provider and API key from `/home/owner/.carbon/config.yaml` (`defaults.provider` + `providers.<name>.api_key` + optional `providers.<name>.base_url`). Audio-generation models are NOT in the carbon config — the skill picks a sensible default per (provider, mode) and accepts `--model` to override. Mode is selected with `--mode music|speech` (default `speech`). Built for embedded Linux: pure shell + curl, no Python or Node required. Use this skill whenever the user asks to create a song, generate music, compose a tune, make a backing track, write a jingle; or to read text aloud, narrate, generate a voiceover, synthesize speech, make an MP3 from text — even if they don't explicitly say "use the skill". If `defaults.provider` is `anthropic`, or if `provider: openai` is paired with `--mode music` (OpenAI has no music API), the skill returns a clear error with the fix.
+description: Generates audio from text — either music (Google Gemini Lyria 3) or speech (OpenAI TTS, Gemini TTS). Reads the active provider and API key from `/home/owner/.carbon/config.yaml` (`defaults.provider` + `providers.<name>.api_key`). Each provider script targets that provider's official endpoint — `https://api.openai.com` for OpenAI, `https://generativelanguage.googleapis.com` for Gemini — and does NOT honor a `base_url` override. Audio-generation models are NOT in the carbon config — the skill picks a sensible default per (provider, mode) and accepts `--model` to override. Mode is selected with `--mode music|speech` (default `speech`). Built for embedded Linux: pure shell + curl, no Python or Node required. **Prerequisite**: `providers.<active-provider>.api_key` MUST be set in `config.yaml` before this skill is invoked; the script exits non-zero with a clear message otherwise. Use this skill whenever the user asks to create a song, generate music, compose a tune, make a backing track, write a jingle; or to read text aloud, narrate, generate a voiceover, synthesize speech, make an MP3 from text — even if they don't explicitly say "use the skill". If `defaults.provider` is `anthropic`, or if `provider: openai` is paired with `--mode music` (OpenAI has no music API), the skill returns a clear error with the fix.
 ---
 
 # generate-sound
 
 Generates an audio file from a text input — either a music clip or spoken speech — using whichever provider is active in `/home/owner/.carbon/config.yaml`.
+
+## Prerequisite — API key must be configured
+
+Before this skill can run, the active provider's API key MUST exist in `config.yaml`:
+
+- `defaults.provider: openai` → `providers.openai.api_key` must be a valid OpenAI key (`sk-...`)
+- `defaults.provider: gemini` → `providers.gemini.api_key` must be a valid Google AI Studio key (`AIza...`)
+
+If the key is missing or empty, the provider script exits non-zero with a message naming the missing field and the path of the config file. Do not retry — ask the user to set the key first. The skill never falls back to another provider's key.
 
 ## Mode is selected via `--mode`, not the config
 
@@ -37,9 +46,9 @@ This skill does **not** do speech-to-text (transcription).
 Five files in `scripts/`:
 
 - `generate.sh` — entry point. Reads `defaults.provider`, picks the (mode × provider) handler, picks a default model if `--model` wasn't given.
-- `openai_tts.sh` — calls `<base_url>/v1/audio/speech` (default base: `https://api.openai.com`). Response is binary audio, written straight to disk.
-- `gemini_tts.sh` — calls `<base_url>/v1beta/models/<model>:generateContent` (default base: `https://generativelanguage.googleapis.com`) with `responseModalities: ["AUDIO"]`. Response is base64 24 kHz / 16-bit / mono PCM; the script prepends a 44-byte WAV header so the file plays in standard players.
-- `gemini_music.sh` — calls `<base_url>/v1beta/models/lyria-3-*-preview:generateContent`. Response is base64 MP3 (Clip and Pro) or WAV (Pro only); the script just decodes — no header wrapping needed because Lyria already emits a complete container.
+- `openai_tts.sh` — calls `https://api.openai.com/v1/audio/speech` (endpoint hardcoded; no override). Response is binary audio, written straight to disk.
+- `gemini_tts.sh` — calls `https://generativelanguage.googleapis.com/v1beta/models/<model>:generateContent` (endpoint hardcoded; no override) with `responseModalities: ["AUDIO"]`. Response is base64 24 kHz / 16-bit / mono PCM; the script prepends a 44-byte WAV header so the file plays in standard players.
+- `gemini_music.sh` — calls `https://generativelanguage.googleapis.com/v1beta/models/lyria-3-*-preview:generateContent` (endpoint hardcoded; no override). Response is base64 MP3 (Clip and Pro) or WAV (Pro only); the script just decodes — no header wrapping needed because Lyria already emits a complete container.
 - `parse_yaml.sh` — minimal YAML reader (top-level + 2-level + 3-level nesting). Shared with `generate-image`.
 
 All five are POSIX-friendly bash. JSON parsing uses `sed` (no `jq` dependency). The TTS WAV header is emitted with `printf` octal escapes so no extra binary tools are needed.
@@ -57,7 +66,7 @@ bash <skill-dir>/scripts/generate.sh "<text or music prompt>" [options]
 | `--mode music\|speech` | `speech` | both | Pass `--mode music` whenever the user is asking for a song/tune/jingle. |
 | `--model NAME` | per (provider, mode) — see table above | both | Use this when the user names a specific model. The carbon config does not contain audio models. |
 | `--voice NAME` | `alloy` (OpenAI TTS), `Kore` (Gemini TTS) | TTS only | Ignored in music mode. |
-| `--format FMT` | HD-equivalent for the active model (see below) | both | OpenAI TTS: `mp3 \| opus \| aac \| flac \| wav \| pcm`. Gemini TTS: `wav` or `pcm`. Lyria Clip: `mp3` only. Lyria Pro: `mp3` or `wav`. |
+| `--format FMT` | HD-equivalent for the active model (see below) | both | OpenAI TTS: `mp3 \| opus \| aac \| flac \| wav \| pcm`. Gemini TTS: `wav` or `pcm`. Lyria (both Clip and Pro): `mp3` only — see "Lyria WAV limitation" below. |
 | `--speed N` | `1.0` | OpenAI TTS only | Range 0.25–4.0. Gemini TTS uses prompt phrasing; Lyria has no speed knob. |
 | `--output PATH` | `./audio_<YYYYmmdd_HHMMSS>.<ext>` in cwd | both | Extension is inferred from `--format`. |
 | `--input-file PATH` | (positional text used) | TTS — long passages | Read text from a file. |
@@ -67,10 +76,15 @@ bash <skill-dir>/scripts/generate.sh "<text or music prompt>" [options]
 If the user did **not** mention audio quality, do **not** pass `--format`. The script falls back to:
 
 - TTS (OpenAI / Gemini) → `wav` (lossless)
-- `lyria-3-pro-preview` → `wav` (lossless)
-- `lyria-3-clip-preview` → `mp3` (Clip emits MP3 only — there is no lossless option)
+- Lyria (Clip and Pro) → `mp3` (see "Lyria WAV limitation" below)
 
-Pass `--format mp3` only when the user explicitly opts out of HD ("a quick draft is fine", "low quality is OK", "save space"). HD is the default precisely because users assume the best version unless they opt out.
+Pass `--format mp3` only when the user explicitly opts out of HD ("a quick draft is fine", "low quality is OK", "save space"). HD is the default for TTS precisely because users assume the best version unless they opt out.
+
+### Lyria WAV limitation
+
+The official docs (`ai.google.dev/gemini-api/docs/music-generation`) say WAV output is selected by setting `responseMimeType: "audio/wav"` in `generationConfig`. In practice the live `:generateContent` endpoint **rejects** that field with HTTP 400 ("`response_mime_type`: allowed mimetypes are `text/plain`, `application/json`, …"). Until Google reconciles this, Lyria via the Gemini API emits MP3 only.
+
+If the user passes `--format wav` for music mode, the script exits non-zero with a clear message rather than silently saving an MP3 with a `.wav` extension. WAV-quality Lyria is available through Vertex AI's `lyria-002` model (`:predict` endpoint, `instances`/`parameters` shape) — that's a different API and not handled by this skill.
 
 The model identifier itself also carries a quality tier (Lyria Clip vs Pro, `tts-1` vs `tts-1-hd`). The defaults this skill picks are HD-tier (`tts-1-hd`, `lyria-3-pro-preview`). To downshift, pass `--model <cheaper-name>` explicitly.
 
@@ -93,17 +107,14 @@ defaults:
 
 providers:
   openai:
-    api_key: "sk-..."
-    base_url: ""            # optional override; empty → api.openai.com
+    api_key: "sk-..."       # REQUIRED — skill refuses to run without it
   gemini:
-    api_key: "AIza-..."
-    base_url: ""            # optional; empty → generativelanguage.googleapis.com
+    api_key: "AIza-..."     # REQUIRED — skill refuses to run without it
   anthropic:
-    api_key: "sk-ant-..."
-    base_url: ""
+    api_key: "sk-ant-..."   # not used (anthropic has no audio API)
 ```
 
-The skill reads `defaults.provider`, `providers.<defaults.provider>.api_key`, and `providers.<defaults.provider>.base_url`. It deliberately **does not** read `defaults.model` — that field is the chat-tier model in carbon's normal flow, not an audio model.
+The skill reads `defaults.provider` and `providers.<defaults.provider>.api_key`. It deliberately **does not** read `defaults.model` (that's the chat tier in carbon's normal flow) and it deliberately **does not** read any `base_url` field — each provider script targets that provider's official endpoint and that endpoint only.
 
 ## Provider routing
 
@@ -122,10 +133,11 @@ After success, tell the user the absolute path of the saved file, the model used
 ## Edge cases worth knowing
 
 - **Lyria response includes lyrics text alongside audio.** The script extracts only the `inlineData.data` field. The text part (lyrics, song structure) is discarded — if the user wants lyrics, that's a second turn against a chat model.
+- **Lyria copyright filter (`finishReason: OTHER`).** Lyria sometimes returns 200 OK with no audio and `finishReason: "OTHER"` plus a `finishMessage` saying the prompt looked too close to existing copyrighted material. The script detects this and surfaces the message verbatim with a hint to rephrase. Tell the user to describe the mood/instruments/tempo abstractly, not by reference to specific songs or artists.
 - **Long input text (TTS).** OpenAI TTS limits input to ~4096 chars per request; Gemini TTS has its own limit. For long passages, split by paragraph and concatenate — but only do this if the user asks; otherwise let the API return its error.
 - **Special characters.** Quotes, newlines, apostrophes are escaped automatically.
-- **`config.yaml` missing or unreadable / `providers.<name>.api_key` empty.** Script exits non-zero. Don't silently fall back to another provider.
-- **`base_url` set to a custom proxy.** The script appends the standard path (e.g. `/v1/audio/speech`, `/v1beta/models/...`) to whatever `base_url` is set, after stripping any trailing slash. If the proxy uses a different path layout, the request will fail.
+- **`config.yaml` missing or unreadable / `providers.<name>.api_key` empty.** Script exits non-zero with the missing field name. This is the single most common failure — surface the message verbatim and stop. Don't silently fall back to another provider.
+- **Custom proxy / gateway.** Not supported. Each provider script hits the official endpoint (`api.openai.com`, `generativelanguage.googleapis.com`) and ignores any `base_url` field in `config.yaml`. If the user needs a proxy, they have to fork the script and change the URL.
 - **Output path's parent directory doesn't exist.** Create the parent first if the user asked for a nested path.
 - **Gemini TTS output is always WAV/PCM.** If the user wants MP3 from Gemini TTS, that requires `ffmpeg`. Lyria itself returns MP3/WAV directly, so no transcoding needed for music.
 - **SynthID watermark on Lyria.** All Lyria-generated audio carries an inaudible SynthID watermark. Mention this if the user is producing for distribution where provenance matters.

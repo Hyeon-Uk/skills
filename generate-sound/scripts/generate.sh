@@ -106,13 +106,13 @@ if [ -z "$MODEL" ]; then
 fi
 
 # Format default (HD-equivalent per mode + model).
+# Lyria via the Gemini :generateContent endpoint currently emits MP3 only —
+# the documented responseMimeType="audio/wav" override is rejected by the live
+# API (HTTP 400, "allowed mimetypes are text/plain, application/json, ..."),
+# so we default to MP3 for both Lyria variants instead of advertising WAV.
 if [ -z "$FORMAT" ]; then
     if [ "$MODE" = "music" ]; then
-        case "$MODEL" in
-            lyria-3-pro-preview)  FORMAT="wav" ;;   # Pro can do lossless
-            lyria-3-clip-preview) FORMAT="mp3" ;;   # Clip is mp3-only
-            *)                    FORMAT="mp3" ;;
-        esac
+        FORMAT="mp3"
     else
         FORMAT="wav"
     fi

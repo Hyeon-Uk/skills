@@ -32,30 +32,25 @@ done
 API_KEY="$(get_yaml_nested3 providers gemini api_key "$CONFIG_FILE")"
 if [ -z "$API_KEY" ]; then
     echo "gemini_music.sh: providers.gemini.api_key not found in $CONFIG_FILE" >&2
+    echo "Set providers.gemini.api_key in $CONFIG_FILE before invoking this skill." >&2
     exit 1
 fi
 
-BASE_URL="$(get_yaml_nested3 providers gemini base_url "$CONFIG_FILE" || true)"
-[ -z "$BASE_URL" ] && BASE_URL="https://generativelanguage.googleapis.com"
-BASE_URL="${BASE_URL%/}"
+# Google Lyria 3 always uses the official endpoint.
+# https://ai.google.dev/gemini-api/docs/music-generation
+BASE_URL="https://generativelanguage.googleapis.com"
 
-# Lyria Clip emits MP3 only; reject WAV early so the user gets a clear message
-# rather than a 400 from the API.
-case "$MODEL" in
-    lyria-3-clip-preview)
-        if [ "$FORMAT" != "mp3" ]; then
-            echo "gemini_music.sh: lyria-3-clip-preview only emits MP3 (you asked for $FORMAT)." >&2
-            echo "Either drop --format, or switch model to lyria-3-pro-preview for WAV support." >&2
-            exit 1
-        fi
-        ;;
-    lyria-3-pro-preview)
-        if [ "$FORMAT" != "mp3" ] && [ "$FORMAT" != "wav" ]; then
-            echo "gemini_music.sh: lyria-3-pro-preview supports mp3 or wav (you asked for $FORMAT)." >&2
-            exit 1
-        fi
-        ;;
-esac
+# Lyria via the Gemini :generateContent endpoint currently emits MP3 only.
+# The documented responseMimeType="audio/wav" override is rejected by the live
+# API; until that mismatch is fixed upstream, only --format mp3 is supported.
+# Vertex AI's lyria-002 returns WAV but uses a different endpoint and request
+# shape (instances/parameters via :predict) — out of scope for this skill.
+if [ "$FORMAT" != "mp3" ]; then
+    echo "gemini_music.sh: only --format mp3 is supported for Lyria via the Gemini API." >&2
+    echo "The documented WAV path (responseMimeType=audio/wav) is rejected by the live :generateContent endpoint." >&2
+    echo "For WAV, use Vertex AI's lyria-002 directly (different endpoint, not handled by this skill)." >&2
+    exit 1
+fi
 
 # Pick the right MIME type for responseMimeType.
 case "$FORMAT" in
@@ -70,11 +65,17 @@ REQUEST_FILE="$(mktemp)"
 RESPONSE_FILE="$(mktemp)"
 trap 'rm -f "$REQUEST_FILE" "$RESPONSE_FILE"' EXIT
 
+# NOTE: per ai.google.dev/gemini-api/docs/music-generation the request should
+# accept generationConfig.responseMimeType="audio/wav" to switch from MP3 to WAV,
+# but the live :generateContent endpoint rejects that field with HTTP 400
+# ("response_mime_type: allowed mimetypes are text/plain, application/json, ...").
+# Until Google fixes that mismatch, Lyria via Gemini API emits MP3 only.
+# WAV via :predict requires Vertex AI's lyria-002 (different endpoint+shape).
 cat > "$REQUEST_FILE" <<EOF
 {"contents":[{"parts":[{"text":"$ESCAPED_PROMPT"}]}],"generationConfig":{"responseModalities":["AUDIO"]}}
 EOF
 
-ENDPOINT="https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent"
+ENDPOINT="$BASE_URL/v1beta/models/${MODEL}:generateContent"
 
 # HTTP_CODE="$(curl -sS -w '%{http_code}' -o "$RESPONSE_FILE" \
 #     "$ENDPOINT" \
@@ -113,6 +114,21 @@ B64="$(tr -d '\n\r' < "$RESPONSE_FILE" \
     | head -1)"
 
 if [ -z "$B64" ]; then
+    # Lyria sometimes returns 200 OK with no audio because a safety filter
+    # tripped (copyright similarity, profanity, etc.). Detect finishReason
+    # and surface its finishMessage cleanly instead of dumping the raw JSON.
+    FINISH_REASON="$(tr -d '\n\r' < "$RESPONSE_FILE" \
+        | sed -n 's/.*"finishReason"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+        | head -1)"
+    if [ -n "$FINISH_REASON" ] && [ "$FINISH_REASON" != "STOP" ]; then
+        FINISH_MSG="$(tr -d '\n\r' < "$RESPONSE_FILE" \
+            | sed -n 's/.*"finishMessage"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+            | head -1)"
+        echo "gemini_music.sh: Lyria refused to generate audio (finishReason=$FINISH_REASON)." >&2
+        [ -n "$FINISH_MSG" ] && echo "  $FINISH_MSG" >&2
+        echo "Try rephrasing the prompt — describe mood/instruments/tempo without referencing real songs or artists." >&2
+        exit 1
+    fi
     echo "gemini_music.sh: could not extract audio data from response" >&2
     cat "$RESPONSE_FILE" >&2
     exit 1

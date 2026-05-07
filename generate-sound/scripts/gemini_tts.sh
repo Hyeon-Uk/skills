@@ -35,12 +35,13 @@ done
 API_KEY="$(get_yaml_nested3 providers gemini api_key "$CONFIG_FILE")"
 if [ -z "$API_KEY" ]; then
     echo "gemini_tts.sh: providers.gemini.api_key not found in $CONFIG_FILE" >&2
+    echo "Set providers.gemini.api_key in $CONFIG_FILE before invoking this skill." >&2
     exit 1
 fi
 
-BASE_URL="$(get_yaml_nested3 providers gemini base_url "$CONFIG_FILE" || true)"
-[ -z "$BASE_URL" ] && BASE_URL="https://generativelanguage.googleapis.com"
-BASE_URL="${BASE_URL%/}"
+# Google Gemini TTS always uses the official endpoint.
+# https://ai.google.dev/gemini-api/docs/speech-generation
+BASE_URL="https://generativelanguage.googleapis.com"
 
 [ -z "$VOICE" ] && VOICE="Kore"
 

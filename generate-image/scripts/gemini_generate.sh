@@ -30,12 +30,13 @@ done
 API_KEY="$(get_yaml_nested3 providers gemini api_key "$CONFIG_FILE")"
 if [ -z "$API_KEY" ]; then
     echo "gemini_generate.sh: providers.gemini.api_key not found in $CONFIG_FILE" >&2
+    echo "Set providers.gemini.api_key in $CONFIG_FILE before invoking this skill." >&2
     exit 1
 fi
 
-BASE_URL="$(get_yaml_nested3 providers gemini base_url "$CONFIG_FILE" || true)"
-[ -z "$BASE_URL" ] && BASE_URL="https://generativelanguage.googleapis.com"
-BASE_URL="${BASE_URL%/}"
+# Google Gemini / Imagen always use the official endpoint.
+# https://ai.google.dev/gemini-api/docs/image-generation
+BASE_URL="https://generativelanguage.googleapis.com"
 
 # Map WxH to Imagen aspect ratio. Only the ratio matters; pixel dims are ignored.
 ASPECT="1:1"
@@ -80,10 +81,12 @@ EOF
         RESPONSE_KEY="bytesBase64Encoded"
         ;;
     *)
-        # Gemini image-generation models (e.g. gemini-2.0-flash-preview-image-generation,
-        # gemini-2.5-flash-image-preview). They use generateContent with responseModalities.
+        # Gemini image-generation models (e.g. gemini-2.5-flash-image, gemini-3-pro-image-preview,
+        # gemini-3.1-flash-image-preview). They use generateContent with responseModalities.
+        # Per the official docs, send ["TEXT","IMAGE"] — some models reject ["IMAGE"] alone.
+        # Aspect ratio goes in generationConfig.imageConfig (separate from Imagen's "parameters").
         cat > "$REQUEST_FILE" <<EOF
-{"contents":[{"parts":[{"text":"$ESCAPED_PROMPT"}]}],"generationConfig":{"responseModalities":["IMAGE"]}}
+{"contents":[{"parts":[{"text":"$ESCAPED_PROMPT"}]}],"generationConfig":{"responseModalities":["TEXT","IMAGE"],"imageConfig":{"aspectRatio":"$ASPECT"}}}
 EOF
         ENDPOINT="$BASE_URL/v1beta/models/${MODEL}:generateContent"
         RESPONSE_KEY="data"
