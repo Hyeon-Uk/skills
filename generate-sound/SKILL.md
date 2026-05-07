@@ -1,33 +1,40 @@
 ---
 name: generate-sound
-description: Generates audio from text — music (Google Gemini Lyria 3) or speech (OpenAI TTS, Gemini TTS). Reads provider and API key from `/home/owner/.carbon/config.yaml`. Mode selected via `--mode music|speech` (default: speech). Picks default model per (provider, mode); accepts `--model` to override. Pure shell + curl, no Python/Node required. Requires `providers.<active-provider>.api_key` in config.yaml. Trigger when the user asks to compose music, generate a song/jingle/tune/backing track, read text aloud, narrate, generate a voiceover, or synthesize speech. Returns an error if `defaults.provider` is `anthropic`, or if `provider: openai` with `--mode music` (OpenAI has no music API).
+description: Generates audio from text — music (Google Gemini Lyria 3) or speech (OpenAI TTS, Gemini TTS). Reads API keys from `/home/owner/.carbon/config.yaml`. Provider is chosen by request type: music always routes to gemini (only Lyria supports music); speech prefers `defaults.provider` but auto-falls back to gemini or openai if the active provider is `anthropic`. Accepts `--model` to override the default model. Pure shell + curl, no Python/Node required. Trigger when the user asks to compose music, generate a song/jingle/tune/backing track, read text aloud, narrate, generate a voiceover, or synthesize speech. Always tell the user which provider was selected.
 ---
 
 # generate-sound
 
-Generates an audio file from a text input — either a music clip or spoken speech — using whichever provider is active in `/home/owner/.carbon/config.yaml`.
+Generates an audio file from a text input — either a music clip or spoken speech — choosing the **most appropriate provider for the request**, regardless of `defaults.provider` in `/home/owner/.carbon/config.yaml`.
 
 ## Prerequisite — API key must be configured
 
-Before this skill can run, the active provider's API key MUST exist in `config.yaml`:
+The skill picks the provider based on the request type, so the required key depends on what the user asked for:
 
-- `defaults.provider: openai` → `providers.openai.api_key` must be a valid OpenAI key (`sk-...`)
-- `defaults.provider: gemini` → `providers.gemini.api_key` must be a valid Google AI Studio key (`AIza...`)
+- **Music** requests always use `gemini` → `providers.gemini.api_key` must be a valid Google AI Studio key (`AIza...`)
+- **Speech** requests use `defaults.provider`; if that's `anthropic`, the skill falls back to `gemini` first, then `openai`
 
-If the key is missing or empty, the provider script exits non-zero with a message naming the missing field and the path of the config file. Do not retry — ask the user to set the key first. The skill never falls back to another provider's key.
+Have both `providers.openai.api_key` and `providers.gemini.api_key` set for full coverage. If the required key is missing or empty, the provider script exits non-zero with a message naming the missing field. Do not retry — ask the user to set the key first.
 
-## Mode is selected via `--mode`, not the config
+## Provider selection — smart routing by request type
 
-The carbon config tracks a chat-tier model (`defaults.model: light`/`heavy`/...) — it doesn't list audio models, and it doesn't say whether the user wants music or speech. So:
+The carbon config's `defaults.provider` is a chat-tier setting, not an audio setting. This skill overrides it when the request type demands a specific provider:
 
-- The orchestrator takes a `--mode music|speech` flag (default: `speech`).
-- It picks a sensible model per (provider, mode) when the user doesn't pass `--model`.
-
-| `defaults.provider` | `--mode speech` default model | `--mode music` default model |
+| Request type | Provider used | Reason |
 |---|---|---|
-| `openai` | `tts-1-hd` | (rejected — no music API) |
+| `--mode music` | always `gemini` | Only Gemini/Lyria supports music generation; OpenAI has no music API |
+| `--mode speech` + `defaults.provider: openai` | `openai` | Honored as configured |
+| `--mode speech` + `defaults.provider: gemini` | `gemini` | Honored as configured |
+| `--mode speech` + `defaults.provider: anthropic` | `gemini` → `openai` fallback | Anthropic has no audio API; fall back automatically |
+
+**Always tell the user which provider was selected** and why, especially when it differs from `defaults.provider`.
+
+The skill picks a sensible model per (provider, mode) when the user doesn't pass `--model`:
+
+| Provider | `--mode speech` default | `--mode music` default |
+|---|---|---|
+| `openai` | `tts-1-hd` | N/A |
 | `gemini` | `gemini-2.5-flash-preview-tts` | `lyria-3-pro-preview` |
-| `anthropic` | (rejected) | (rejected) |
 
 If the user clearly wants music ("compose a song", "make a backing track", "generate a 30-second jingle"), pass `--mode music`. Otherwise default mode (speech) is correct.
 
@@ -37,7 +44,7 @@ Trigger on any user request that boils down to "produce an audio file from this 
 - **Music**: "Generate a 30-second cheerful acoustic folk tune with guitar and harmonica" / "Compose a tense cinematic cue for the chase scene" / "Make a jingle for my podcast intro"
 - **Speech**: "Read this paragraph aloud and save it as narration.mp3" / "Generate a voiceover for the intro of my video" / "Use a calm female voice to narrate this script"
 
-If the user names a provider explicitly ("use Gemini Lyria for..."), still defer to the active `defaults.provider` in `config.yaml` — the user's setting wins. Only mention a mismatch if the active config can't fulfill the request (e.g. `defaults.provider: anthropic`, or `defaults.provider: openai` + `--mode music`).
+If the user names a provider explicitly ("use OpenAI for this"), honor that request — but if it can't fulfill the mode (e.g. "use OpenAI" + music), explain why and switch to the capable provider instead.
 
 This skill does **not** do speech-to-text (transcription).
 
@@ -45,7 +52,7 @@ This skill does **not** do speech-to-text (transcription).
 
 Five files in `scripts/`:
 
-- `generate.sh` — entry point. Reads `defaults.provider`, picks the (mode × provider) handler, picks a default model if `--model` wasn't given.
+- `generate.sh` — entry point. Determines the effective provider via smart routing (see above), picks the (mode × provider) handler, picks a default model if `--model` wasn't given.
 - `openai_tts.sh` — calls `https://api.openai.com/v1/audio/speech` (endpoint hardcoded; no override). Response is binary audio, written straight to disk.
 - `gemini_tts.sh` — calls `https://generativelanguage.googleapis.com/v1beta/models/<model>:generateContent` (endpoint hardcoded; no override) with `responseModalities: ["AUDIO"]`. Response is base64 24 kHz / 16-bit / mono PCM; the script prepends a 44-byte WAV header so the file plays in standard players.
 - `gemini_music.sh` — calls `https://generativelanguage.googleapis.com/v1beta/models/lyria-3-*-preview:generateContent` (endpoint hardcoded; no override). Response is base64 MP3 (Clip and Pro) or WAV (Pro only); the script just decodes — no header wrapping needed because Lyria already emits a complete container.
@@ -118,17 +125,25 @@ The skill reads `defaults.provider` and `providers.<defaults.provider>.api_key`.
 
 ## Provider routing
 
-| `defaults.provider` | `--mode` | Outcome |
+Routing now ignores `defaults.provider` for music and applies automatic fallback for speech when `anthropic` is set:
+
+| `--mode` | effective provider | Outcome |
 |---|---|---|
-| `anthropic` | any | exit 2, "no audio generation API" |
-| `openai` | `music` | exit 2, "OpenAI has no music API; switch to gemini for Lyria" |
-| `openai` | `speech` | dispatch to `openai_tts.sh`, default model `tts-1-hd` |
-| `gemini` | `music` | dispatch to `gemini_music.sh`, default model `lyria-3-pro-preview` |
-| `gemini` | `speech` | dispatch to `gemini_tts.sh`, default model `gemini-2.5-flash-preview-tts` |
+| `music` | always `gemini` | dispatch to `gemini_music.sh`, default model `lyria-3-pro-preview` |
+| `speech` | `openai` (if configured) | dispatch to `openai_tts.sh`, default model `tts-1-hd` |
+| `speech` | `gemini` (if configured) | dispatch to `gemini_tts.sh`, default model `gemini-2.5-flash-preview-tts` |
+| `speech` | `anthropic` → fallback `gemini` | auto-switch; tell user "anthropic has no audio API, using gemini" |
+| `speech` | `anthropic` → no gemini key → fallback `openai` | auto-switch; tell user which fallback was used |
 
 ## Reporting back to the user
 
-After success, tell the user the absolute path of the saved file, the model used, and the chosen voice (TTS only). If the script failed, surface its stderr verbatim. The most common failures (missing key, bad voice name, anthropic provider, openai+music mismatch) all need a config or argument change rather than a retry.
+After success, tell the user:
+1. The **effective provider** chosen (especially if it differs from `defaults.provider`)
+2. The absolute path of the saved file
+3. The model used
+4. The chosen voice (TTS only)
+
+If the script failed, surface its stderr verbatim. The most common failures (missing key, bad voice name) require a config change — don't retry blindly.
 
 ## Edge cases worth knowing
 
