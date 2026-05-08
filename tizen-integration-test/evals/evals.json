@@ -1,0 +1,23 @@
+{
+  "skill_name": "tizen-integration-test",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "message-port 패키지에 integration test 추가하고 싶어. 지금은 unit_tests/ 만 있는데, rpc-port 처럼 integ_tests/ 디렉토리 만들어서 같은 디바이스 안에서 두 프로세스가 message_port_register_local_port + message_port_send_message 로 round-trip 하는 시나리오 하나 짜줘. spec 파일에도 %package integtests 같이 추가해야 함.",
+      "expected_output": "Phase 1 worksheet enumerating boundary (process A ↔ process B via message-port socket), at least S1 happy path scenario, timeout budget, then a scaffolded message-port/test/integ_tests/{main.cc,CMakeLists.txt,message_port_roundtrip_test.cc}, an edit to message-port/test/CMakeLists.txt adding ADD_SUBDIRECTORY(integ_tests), a TARGET_MESSAGE_PORT_INTEGTESTS variable in the top-level CMakeLists.txt, and %package integtests + %files integtests blocks added to message-port/packaging/message-port.spec. Test code uses g_main_loop + g_timeout_add (no sleep), no gmock/MOCK_HOOK, links against the real ${TARGET_MESSAGE_PORT}.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "rpc-port integ_tests 에 reconnect 시나리오 하나 추가해줘 — proxy 가 stub 에 connect → disconnect → 같은 stub 이 다시 listen 시작 → 같은 proxy 가 다시 connect 까지 한 TEST_F 안에서 끝나는 걸로. 기존 RpcPortTcpBase fixture 확장해도 되고 새로 만들어도 됨.",
+      "expected_output": "A short Phase 1 worksheet identifying the scenario as S5 (reconnect / re-listen) from the catalog, with a note that this is two phases of RunMainLoop and flags must be reset between them. Then a TEST_F appended to rpc-port/test/integ_tests/rpc_port_tcp_test.cc (or a new file in the same dir) that: (a) connects, asserts both touch flags, (b) triggers disconnect and waits, (c) resets the touch flags, (d) re-listens on the stub, (e) reconnects with the proxy, (f) waits and asserts both connected flags fire again. Uses RunMainLoop(\"phase\") with descriptive phase strings, threads only if a sync API is involved, and never sprinkles sleeps. No spec or CMake edits required (file already in the build).",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "data-control 에 integration test 처음 만들어보려는데, 지금은 그냥 unit_tests 디렉토리만 있어. provider 쪽이 select / insert / update / delete 콜백을 등록하고 consumer 가 해당 요청 보내서 round-trip 되는지 검증하는 e2e 테스트를 넣고 싶음. 어떻게 시작해야 돼?",
+      "expected_output": "Should NOT just dump code. First, output the Phase 1 worksheet: boundary (consumer process ↔ provider process via data-control socket and dbus), real deps (glib, dbus or sd-bus depending on tizen version, sqlite if the provider hits a DB, security-manager / cynara for the privilege check), test artefacts (sqlite DB on disk if used — must be cleaned in TearDown), permissions (data-control privileges in cynara). Then enumerate at least S1 (select round-trip), S3 (callback fires with right payload), and S4 (provider goes away → consumer sees disconnect/error). Confirm the plan against the section 1.4 checklist (no mocks, no system mutation, every async has timeout). THEN scaffold data-control/tests/integ_tests/ with main.cc + CMakeLists.txt + a single round-trip test file, edit data-control/tests/CMakeLists.txt to add ADD_SUBDIRECTORY(integ_tests), set TARGET_DATA_CONTROL_INTEGTESTS in the top-level CMakeLists.txt, add %package integtests + %files integtests to data-control/packaging/data-control.spec. Tell the user the gbs build command and the on-device sdb shell run command, but do not run them.",
+      "files": []
+    }
+  ]
+}

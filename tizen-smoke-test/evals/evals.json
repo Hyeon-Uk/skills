@@ -1,0 +1,23 @@
+{
+  "skill_name": "tizen-smoke-test",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "message-port 패키지에 smoke test 추가해줘. 지금은 message-port_unittests 만 있는데 rpc-port 처럼 /usr/bin/tizen-unittests/<pkg>/run-unittest.sh 도 같이 install 되도록 spec 수정 필요. CI 가 install 직후에 그거 돌려서 binary 가 돌아가는지 확인하는 거야.",
+      "expected_output": "Phase 1 worksheet (one-sentence failure mode, time budget under 30s, in-process boundary), then Pattern A selected. Output two spec edits: (a) inside %install after %make_install, the heredoc that writes run-unittest.sh, the install -m 0755 to %{buildroot}%{_bindir}/tizen-unittests/%{name}/, and the sed -i to substitute <NAME> with message-port; (b) under %files unittests, a new line %{_bindir}/tizen-unittests/%{name}/run-unittest.sh. The runner test_main calls /usr/bin/<NAME>_unittests (or /usr/bin/message-port_unittests). Setup/teardown are empty stubs. Tells the user the gbs build command and the on-device sdb shell run-unittest.sh command, but does not run them.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "rpk-installer 에 smoke test 새로 만들거야. wgt-backend 처럼 install/uninstall 한 번 돌리는 시나리오 1개부터 시작하고 싶어. test/smoke_tests 디렉토리, smoke_test.cc 한 개, CMakeLists, spec 의 installer-ut 서브패키지까지 한번에 셋업.",
+      "expected_output": "Phase 1 worksheet identifying it as Pattern B (installer-shaped package, real install round trip). Then scaffolds rpk-installer/test/smoke_tests/{smoke_test.cc, CMakeLists.txt, rpk_smoke_utils.{h,cc}}. The smoke_test.cc has: (a) SmokeEnvironment with SetUp/TearDown that backs up/restores paths and creates a test user, (b) a signalHandler installed in main() for SIGINT/SIGTERM/SIGABRT that calls env->TearDown() and exits, (c) one TEST_F that does ASSERT_EQ(backend.Install(...), Result::OK), ValidatePackage, ASSERT_EQ(backend.Uninstall(...), Result::OK). The CMakeLists has ADD_EXECUTABLE for smoke-test, INSTALL TARGETS into ${BINDIR}/rpk-installer-ut, INSTALL(DIRECTORY test_samples/), and an ADD_LIBRARY for rpk-smoke-utils. Spec edits include %package -n %{name}-installer-ut, %post applying setcap cap_chown,cap_dac_override,cap_fowner,cap_mac_override=eip to every binary, and %files listing every binary + the .so + the header + test_samples/. No mocks. Tells the user the gbs build and sdb run command.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "bundle 패키지의 spec 보면 sub-package 들 (parcel, tizen-database, tizen-dlog, tizen-libopener, tizen-shared-queue) 마다 run-unittest.sh 가 sed 로 NAME 치환해서 install 되는데, 이걸 수정해서 smoke 만 따로 돌리는 별도 RPM (bundle-smoketests) 으로 분리하고 싶어. 어떻게 해야 돼? 그리고 분리하는 게 좋은 결정인지도 같이 봐줘.",
+      "expected_output": "Should NOT just dump code. First, push back gently: the existing tizen-unittests/<pkg>/run-unittest.sh convention IS the smoke entry point that Tizen CI auto-discovers, and splitting it into a new sub-package means losing that auto-discovery and forcing a custom CI hook. Recommend instead: keep the existing pattern, optionally add a --gtest_filter to gate which tests run as smoke vs the full suite. Only if the user really wants a separate RPM, then proceed: scaffold a new %package smoketests block, modify the existing %install to also drop the runner under a new path (or copy the binary), and add a %files smoketests block. Output the worksheet identifying the trade-off in the failure mode line ('we are protecting against X but losing the auto-discovery for Y'). Provide both options and let the user pick.",
+      "files": []
+    }
+  ]
+}

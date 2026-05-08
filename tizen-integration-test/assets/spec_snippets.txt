@@ -1,0 +1,45 @@
+### Snippets to drop into <pkg>/packaging/<pkg>.spec
+### Replace <pkg> with the package name (e.g. rpc-port, message-port, aul).
+### Read references/spec_packaging.md for ordering rules and how to debug
+### "unpackaged files" errors at gbs build time.
+
+
+############################################################################
+# 1. Sub-package declaration — paste near the other %package blocks, after
+#    the unittests one if it exists.
+############################################################################
+
+#################################################
+# <pkg>-integtests
+#################################################
+%package integtests
+Summary:    GTest for <pkg>
+Group:      Development/Libraries
+Requires:   %{name}
+
+%description integtests
+Integration GTest for <pkg>
+
+
+############################################################################
+# 2. %files section — paste near the other %files blocks, AFTER %files
+#    unittests if it exists. Order matters: each binary listed here must
+#    actually be installed by `cmake --install`/`%cmake_install`/`make install`.
+############################################################################
+
+#################################################
+# <pkg>-integtests
+#################################################
+%files integtests
+%{_bindir}/<pkg>_integtests
+# If the suite ships helper scripts (cert generators, fixtures), list them too:
+# %{_bindir}/mk_certs.sh
+# /tmp/<pkg>-certs/*
+
+############################################################################
+# 3. (Optional) BuildRequires — usually inherited from the main package, but
+#    if the integ tests need an extra dep that the lib itself does not need,
+#    add it to the top-level BuildRequires list. Common ones:
+#      BuildRequires:  pkgconfig(gmock)
+#      BuildRequires:  pkgconfig(glib-2.0)
+############################################################################

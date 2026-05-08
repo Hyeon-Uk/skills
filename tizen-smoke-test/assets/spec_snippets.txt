@@ -1,0 +1,86 @@
+### Snippets to drop into <pkg>/packaging/<pkg>.spec
+### Pick the section that matches the pattern you're using.
+### Read references/spec_wiring.md before pasting; ordering inside the spec matters.
+
+
+############################################################################
+# Pattern A — post-install runner (drops a run-unittest.sh under
+# /usr/bin/tizen-unittests/<pkg>/). Most packages use this.
+############################################################################
+
+### --- 1. Goes inside %install, AFTER %make_install -----------------------
+
+cat << EOF > run-unittest.sh
+#!/bin/sh
+setup() {
+    echo "setup start"
+}
+
+test_main() {
+    echo "test_main start"
+    /usr/bin/<NAME>-unittests
+}
+
+teardown() {
+    echo "teardown start"
+}
+
+main() {
+    setup
+    test_main
+    teardown
+}
+
+main "\$*"
+EOF
+
+mkdir -p %{buildroot}%{_bindir}/tizen-unittests/%{name}
+install -m 0755 run-unittest.sh %{buildroot}%{_bindir}/tizen-unittests/%{name}/
+sed -i -e 's/<NAME>/<pkg>/g' %{buildroot}%{_bindir}/tizen-unittests/%{name}/run-unittest.sh
+
+
+### --- 2. Goes inside %files unittests (or whichever sub-package owns the
+###      test binary). Without this line the file lands but the RPM doesn't
+###      ship it, and `gbs build` fails with "unpackaged files".
+%files unittests
+%{_bindir}/<pkg>_unittests
+%{_bindir}/tizen-unittests/%{name}/run-unittest.sh
+
+### Optional: explicit attr matches the aul-1 / app-installers convention:
+# %attr(0755,root,root) %{_bindir}/tizen-unittests/%{name}/run-unittest.sh
+
+
+############################################################################
+# Pattern B — separate smoke-test sub-package + smoke binary with elevated
+# capabilities. Used by installer packages (wgt-backend, tpk-backend, ...).
+############################################################################
+
+### --- 1. Sub-package declaration — alongside %package unittests ----------
+
+%package -n %{name}-installer-ut
+Summary:    Installer smoke tests for <pkg>
+Group:      Development/Libraries
+Requires:   %{name}
+
+%description -n %{name}-installer-ut
+End-to-end install/uninstall smoke tests for <pkg>.
+
+
+### --- 2. %post block — applies setcap so the test binary can install/uninstall
+
+%post -n %{name}-installer-ut
+/usr/sbin/setcap cap_chown,cap_dac_override,cap_fowner,cap_mac_override=eip %{_bindir}/<pkg>-installer-ut/smoke-test
+/usr/sbin/setcap cap_chown,cap_dac_override,cap_fowner,cap_mac_override=eip %{_bindir}/<pkg>-installer-ut/smoke-test-helper
+# Add a setcap line per binary you ship.
+
+
+### --- 3. %files block — list every binary, every utils .so, every header,
+###      and the test_samples directory. Without `setcap` the binaries
+###      install but fail at runtime with permission errors.
+
+%files -n %{name}-installer-ut
+%{_bindir}/<pkg>-installer-ut/smoke-test
+%{_bindir}/<pkg>-installer-ut/smoke-test-helper
+%{_libdir}/lib<pkg>-smoke-utils.so*
+%{_includedir}/app-installers/smoke_tests/<pkg>_smoke_utils.h
+%{_datadir}/<pkg>-installer-ut/test_samples/
