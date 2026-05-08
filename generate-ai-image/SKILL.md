@@ -1,7 +1,7 @@
 ---
 name: generate-ai-image
-description: Generates images via OpenAI (gpt-image-1) or Google Gemini (gemini-3.1-flash-image-preview). Reads provider and API key from /home/owner/.carbon/config.yaml. Both providers are pinned to static endpoint+model — --model is accepted but ignored with a warning. Pure shell + curl, no Python/Node required. Requires providers.<active-provider>.api_key in config.yaml. Trigger when the user asks to create, generate, draw, render, or make an image; mentions gpt-image, Gemini image, or text-to-image; or references their Carbon config provider. Returns an error if defaults.provider is anthropic (Anthropic has no image API).
-argument-hint: "[--model NAME] [--quality LEVEL] [--output PATH] [--size WxH]"
+description: Generates images via OpenAI (gpt-image-1) or Google Gemini (gemini-3.1-flash-image-preview). Reads provider and API key from /home/owner/.carbon/config.yaml. Both providers are pinned to static endpoint+model. Pure shell + curl, no Python/Node required. Requires providers.<active-provider>.api_key in config.yaml. Trigger when the user asks to create, generate, draw, render, or make an image; mentions gpt-image, Gemini image, or text-to-image; or references their Carbon config provider. Returns an error if defaults.provider is anthropic (Anthropic has no image API).
+argument-hint: "[--quality LEVEL] [--output PATH] [--size WxH]"
 user-invocable: true
 allowed-tools: true
 ---
@@ -41,7 +41,6 @@ bash <skill-dir>/scripts/generate.sh "<prompt>" [OPTIONS]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--model NAME` | (pinned per provider) | Accepted but ignored with a warning |
 | `--quality LEVEL` | `high` (gpt-image-1) | Quality level — see "When to use `--quality`" above |
 | `--output PATH` | `./image_<timestamp>.png` | Output file path |
 | `--size WxH` | `1024x1024` | Image dimensions |
@@ -49,11 +48,13 @@ bash <skill-dir>/scripts/generate.sh "<prompt>" [OPTIONS]
 
 ### Pinned Models per Provider
 
-| `defaults.provider` | Model (pinned at static endpoint) | `--model` override? |
-|---|---|---|
-| `openai` | `gpt-image-1` | no — ignored with a warning |
-| `gemini` | `gemini-3.1-flash-image-preview` | no — ignored with a warning |
-| `anthropic` | (rejected — no image API) | n/a |
+| `defaults.provider` | Model (pinned at static endpoint) |
+|---|---|
+| `openai` | `gpt-image-1` |
+| `gemini` | `gemini-3.1-flash-image-preview` |
+| `anthropic` | (rejected — no image API) |
+
+`--model` is no longer a valid option. Passing it (or any other removed flag) prints `unsupported option '--model'` to stderr and the run continues with the pinned values.
 
 ### Size Options by Provider
 
@@ -123,7 +124,7 @@ It deliberately **does not** read `defaults.model` (that's the chat tier in carb
 | Prompt contains quotes or newlines | Pass as single argument; scripts JSON-escape internally |
 | `config.yaml` missing | Exit non-zero with path tried |
 | `providers.<name>.api_key` empty | Exit non-zero with field name |
-| `--model` doesn't match provider | API will reject; suggest fixing one or the other |
+| `--model` passed | Removed option; warning logged, run continues with pinned model |
 | Output path's parent directory doesn't exist | Script fails when writing; create directory first |
 | Custom proxy / gateway | Not supported; scripts hit official endpoints only |
 
@@ -133,7 +134,7 @@ It deliberately **does not** read `defaults.model` (that's the chat tier in carb
 # Basic usage with default model
 bash generate.sh "a serene mountain landscape at sunset"
 
-# --model is accepted but ignored (model is pinned per-provider)
+# --model is no longer supported; passing it logs a warning and is ignored
 bash generate.sh "cyberpunk city"
 
 # Custom size and output path

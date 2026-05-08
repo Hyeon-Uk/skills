@@ -27,7 +27,6 @@ while [ $# -gt 0 ]; do
         --config)  CONFIG_FILE="$2"; shift 2 ;;
         --size)    SIZE="$2";        shift 2 ;;
         --output)  OUTPUT="$2";      shift 2 ;;
-        --model|--quality) shift 2 ;;   # accepted for parent compat; ignored — model is fixed
         --) shift; PROMPT="$*"; break ;;
         *)  echo "gemini_generate.sh: unexpected arg: $1" >&2; exit 1 ;;
     esac

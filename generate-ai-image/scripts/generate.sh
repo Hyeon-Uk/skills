@@ -4,16 +4,15 @@
 # defaults.provider, and dispatches.
 #
 # The carbon config does NOT carry an image model — it tracks the user's
-# chat-tier choice (e.g. defaults.model: light). Image model defaults are
-# baked into the provider scripts. Both providers now pin their endpoint+model
-# at static URLs:
+# chat-tier choice (e.g. defaults.model: light). Both provider scripts pin
+# their endpoint+model at static URLs:
 #   openai → gpt-image-1
 #   gemini → gemini-3.1-flash-image-preview
-# `--model` is accepted on the CLI but logged as ignored.
+# `--model` is no longer a real option; passing it prints an
+# "unsupported option" warning and continues.
 #
 # Usage:
-#   generate.sh "<prompt>" [--model NAME] [--quality LEVEL]
-#                          [--output PATH] [--size WxH]
+#   generate.sh "<prompt>" [--quality LEVEL] [--output PATH] [--size WxH]
 #
 # Exit codes:
 #   0  success — final line of stdout is the absolute output path
@@ -28,19 +27,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/parse_yaml.sh"
 
 PROMPT=""
-MODEL=""
 QUALITY=""
 OUTPUT=""
 SIZE="1024x1024"
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --model)   MODEL="${2:-}";   shift 2 ;;
+        --model)
+            echo "generate.sh: unsupported option '--model' — models are pinned per provider; ignoring." >&2
+            shift 2
+            ;;
         --quality) QUALITY="${2:-}"; shift 2 ;;
         --output)  OUTPUT="${2:-}";  shift 2 ;;
         --size)    SIZE="${2:-}";    shift 2 ;;
         --help|-h)
-            sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         --) shift; PROMPT="${1:-$PROMPT}"; shift || true ;;
@@ -51,7 +52,7 @@ done
 
 if [ -z "$PROMPT" ]; then
     echo "generate.sh: prompt is required" >&2
-    echo "Usage: generate.sh \"<prompt>\" [--model NAME] [--quality LEVEL] [--output PATH] [--size WxH]" >&2
+    echo "Usage: generate.sh \"<prompt>\" [--quality LEVEL] [--output PATH] [--size WxH]" >&2
     exit 1
 fi
 
@@ -67,24 +68,6 @@ if [ -z "$PROVIDER" ]; then
     exit 1
 fi
 
-# Both provider scripts now pin their endpoint+model. Warn once if the user
-# explicitly passed --model so they understand it has no effect, then clear
-# the variable so we don't bother passing it through.
-case "$PROVIDER" in
-    gemini|google)
-        if [ -n "$MODEL" ]; then
-            echo "generate.sh: --model is ignored for gemini; this skill is pinned to gemini-3.1-flash-image-preview." >&2
-        fi
-        MODEL=""
-        ;;
-    openai)
-        if [ -n "$MODEL" ]; then
-            echo "generate.sh: --model is ignored for openai; this skill is pinned to gpt-image-1." >&2
-        fi
-        MODEL=""
-        ;;
-esac
-
 if [ -z "$OUTPUT" ]; then
     OUTPUT="./image_$(date +%Y%m%d_%H%M%S).png"
 fi
@@ -96,7 +79,7 @@ generate.sh: provider 'anthropic' does not support image generation.
 Anthropic's Claude models can analyze images but cannot create them.
 Edit $CONFIG_FILE and set 'defaults.provider:' to 'openai' or 'gemini'.
 Image-capable defaults: gpt-image-1 (openai), gemini-3.1-flash-image-preview (gemini).
-Both endpoints and models are pinned (--model is ignored).
+Both endpoints and models are pinned.
 EOF
         exit 2
         ;;

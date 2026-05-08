@@ -4,10 +4,10 @@
 #
 # Endpoint and model are STATIC. The skill targets OpenAI's
 # /v1/audio/speech REST endpoint with model `gpt-4o-mini-tts`, the newest
-# TTS model. Note: gpt-4o-mini-tts does NOT accept the `speed` field
-# (that knob exists only on tts-1 / tts-1-hd). If the parent passes
-# --speed, this script warns and drops the field rather than letting the
-# API reject the whole request.
+# TTS model. Speed control is not exposed because gpt-4o-mini-tts does
+# not accept the `speed` field (that knob exists only on tts-1 /
+# tts-1-hd); the parent script warns "unsupported option" if a user
+# passes --speed.
 
 set -eu
 
@@ -22,7 +22,6 @@ OPENAI_TTS_ENDPOINT="https://api.openai.com/v1/audio/speech"
 CONFIG_FILE=""
 VOICE=""
 FORMAT="wav"
-SPEED=""
 OUTPUT=""
 TEXT=""
 
@@ -31,9 +30,7 @@ while [ $# -gt 0 ]; do
         --config) CONFIG_FILE="$2"; shift 2 ;;
         --voice)  VOICE="$2";       shift 2 ;;
         --format) FORMAT="$2";      shift 2 ;;
-        --speed)  SPEED="$2";       shift 2 ;;
         --output) OUTPUT="$2";      shift 2 ;;
-        --model)  shift 2 ;;   # accepted for parent compat; ignored — model is fixed
         --) shift; TEXT="$*"; break ;;
         *)  echo "openai_tts.sh: unexpected arg: $1" >&2; exit 1 ;;
     esac
@@ -47,12 +44,6 @@ if [ -z "$API_KEY" ]; then
 fi
 
 [ -z "$VOICE" ] && VOICE="alloy"
-
-# gpt-4o-mini-tts does not accept the `speed` field; warn the user once
-# rather than silently dropping the value or letting the API 400.
-if [ -n "$SPEED" ]; then
-    echo "openai_tts.sh: --speed is not supported by $OPENAI_TTS_MODEL and will be ignored. (Use a different model out-of-band if you need speed control.)" >&2
-fi
 
 ESCAPED_TEXT="$(json_escape "$TEXT")"
 

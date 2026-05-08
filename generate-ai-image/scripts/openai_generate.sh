@@ -29,7 +29,6 @@ while [ $# -gt 0 ]; do
         --quality) QUALITY="$2";     shift 2 ;;
         --size)    SIZE="$2";        shift 2 ;;
         --output)  OUTPUT="$2";      shift 2 ;;
-        --model)   shift 2 ;;   # accepted for parent compat; ignored — model is fixed
         --) shift; PROMPT="$*"; break ;;
         *)  echo "openai_generate.sh: unexpected arg: $1" >&2; exit 1 ;;
     esac

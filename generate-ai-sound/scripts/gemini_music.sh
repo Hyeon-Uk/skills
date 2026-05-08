@@ -35,7 +35,6 @@ while [ $# -gt 0 ]; do
         --length) LENGTH="$2";      shift 2 ;;
         --format) FORMAT="$2";      shift 2 ;;
         --output) OUTPUT="$2";      shift 2 ;;
-        --model)  shift 2 ;;   # accepted for parent compat; ignored — model is fixed via --length
         --) shift; PROMPT="$*"; break ;;
         *)  echo "gemini_music.sh: unexpected arg: $1" >&2; exit 1 ;;
     esac

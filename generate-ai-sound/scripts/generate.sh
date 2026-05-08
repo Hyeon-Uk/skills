@@ -5,17 +5,16 @@
 #
 # The carbon config does NOT carry an audio model — it tracks the user's
 # chat-tier choice (e.g. defaults.model: light). Models are pinned inside
-# the provider scripts; --model is accepted on the CLI but logged as
-# ignored. Music selects between two static endpoints via --length clip|full.
+# the provider scripts. Music selects between two static endpoints via
+# --length clip|full. `--model` and `--speed` are no longer real options;
+# passing either prints an "unsupported option" warning and continues.
 #
 # Usage:
 #   generate.sh "<text or music prompt>"
 #               [--mode music|speech]   (default: speech)
-#               [--model NAME]          (accepted but ignored — models are pinned)
 #               [--length clip|full]    (music only; default: full)
 #               [--voice NAME]          (TTS only)
 #               [--format FMT]
-#               [--speed N]             (TTS only; ignored by gpt-4o-mini-tts)
 #               [--output PATH]
 #               [--input-file PATH]
 #
@@ -34,25 +33,29 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEXT=""
 INPUT_FILE=""
 MODE="speech"
-MODEL=""
 LENGTH=""
 VOICE=""
 FORMAT=""
-SPEED=""
 OUTPUT=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --mode)       MODE="${2:-}";       shift 2 ;;
-        --model)      MODEL="${2:-}";      shift 2 ;;
         --length)     LENGTH="${2:-}";     shift 2 ;;
         --voice)      VOICE="${2:-}";      shift 2 ;;
         --format)     FORMAT="${2:-}";     shift 2 ;;
-        --speed)      SPEED="${2:-}";      shift 2 ;;
         --output)     OUTPUT="${2:-}";     shift 2 ;;
         --input-file) INPUT_FILE="${2:-}"; shift 2 ;;
+        --model)
+            echo "generate.sh: unsupported option '--model' — models are pinned per provider×mode; ignoring." >&2
+            shift 2
+            ;;
+        --speed)
+            echo "generate.sh: unsupported option '--speed' — no pinned TTS model accepts speed; ignoring." >&2
+            shift 2
+            ;;
         --help|-h)
-            sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         --) shift; TEXT="${1:-$TEXT}"; shift || true ;;
@@ -92,30 +95,6 @@ if [ -z "$PROVIDER" ]; then
     echo "generate.sh: 'defaults.provider' missing from $CONFIG_FILE" >&2
     exit 1
 fi
-
-# All provider×mode combos that this skill actually dispatches now pin their
-# endpoint+model inside the child script. Warn once if the user explicitly
-# passed --model so they understand it has no effect, then clear MODEL.
-case "$PROVIDER:$MODE" in
-    openai:speech)
-        if [ -n "$MODEL" ]; then
-            echo "generate.sh: --model is ignored for openai speech; this skill is pinned to gpt-4o-mini-tts." >&2
-        fi
-        MODEL=""
-        ;;
-    gemini:speech|google:speech)
-        if [ -n "$MODEL" ]; then
-            echo "generate.sh: --model is ignored for gemini speech; this skill is pinned to gemini-3.1-flash-tts-preview." >&2
-        fi
-        MODEL=""
-        ;;
-    gemini:music|google:music)
-        if [ -n "$MODEL" ]; then
-            echo "generate.sh: --model is ignored for gemini music; use --length clip|full to pick the pinned endpoint." >&2
-        fi
-        MODEL=""
-        ;;
-esac
 
 # Default --length for music mode.
 if [ "$MODE" = "music" ] && [ -z "$LENGTH" ]; then
@@ -167,7 +146,6 @@ EOF
             --config "$CONFIG_FILE" \
             --voice  "$VOICE" \
             --format "$FORMAT" \
-            --speed  "$SPEED" \
             --output "$OUTPUT" \
             -- "$TEXT"
         ;;

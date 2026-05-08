@@ -33,7 +33,6 @@ while [ $# -gt 0 ]; do
         --voice)  VOICE="$2";       shift 2 ;;
         --format) FORMAT="$2";      shift 2 ;;
         --output) OUTPUT="$2";      shift 2 ;;
-        --model)  shift 2 ;;   # accepted for parent compat; ignored — model is fixed
         --) shift; TEXT="$*"; break ;;
         *)  echo "gemini_tts.sh: unexpected arg: $1" >&2; exit 1 ;;
     esac
