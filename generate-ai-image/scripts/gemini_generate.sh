@@ -92,9 +92,37 @@ if [ -z "$B64" ]; then
     exit 1
 fi
 
+# Gemini decides the actual image format on its end (image/jpeg vs image/png
+# vs image/webp). If it doesn't match the extension the caller requested,
+# rename so the file extension reflects the real bytes — otherwise viewers
+# and downstream tools see a .png that's secretly JPEG.
+RETURNED_MIME="$(tr -d '\n\r' < "$RESPONSE_FILE" \
+    | sed -n 's/.*"mimeType"[[:space:]]*:[[:space:]]*"\(image\/[^"]*\)".*/\1/p' \
+    | head -1)"
+
+case "$RETURNED_MIME" in
+    image/jpeg|image/jpg) ACTUAL_EXT="jpg" ;;
+    image/png)            ACTUAL_EXT="png" ;;
+    image/webp)           ACTUAL_EXT="webp" ;;
+    *)                    ACTUAL_EXT="" ;;   # unknown or absent — leave path alone
+esac
+
+if [ -n "$ACTUAL_EXT" ]; then
+    REQUESTED_EXT="$(printf '%s' "${OUTPUT##*.}" | tr '[:upper:]' '[:lower:]')"
+    [ "$REQUESTED_EXT" = "jpeg" ] && REQUESTED_EXT="jpg"
+    if [ "$ACTUAL_EXT" != "$REQUESTED_EXT" ]; then
+        case "$OUTPUT" in
+            *.*) NEW_OUTPUT="${OUTPUT%.*}.${ACTUAL_EXT}" ;;
+            *)   NEW_OUTPUT="${OUTPUT}.${ACTUAL_EXT}"   ;;
+        esac
+        echo "gemini_generate.sh: response is $RETURNED_MIME; saving as $NEW_OUTPUT (requested .${REQUESTED_EXT:-<none>})." >&2
+        OUTPUT="$NEW_OUTPUT"
+    fi
+fi
+
 printf '%s' "$B64" | base64 -d > "$OUTPUT" || {
     echo "gemini_generate.sh: base64 decode failed" >&2
     exit 1
 }
 
-echo "Image saved to: $OUTPUT (model=$GEMINI_IMAGE_MODEL)"
+echo "Image saved to: $OUTPUT (model=$GEMINI_IMAGE_MODEL${RETURNED_MIME:+, mime=$RETURNED_MIME})"
