@@ -4,17 +4,18 @@
 # defaults.provider, and dispatches to the right (mode × provider) handler.
 #
 # The carbon config does NOT carry an audio model — it tracks the user's
-# chat-tier choice (e.g. defaults.model: light). Audio model defaults are
-# baked into this script per (provider, mode); the user can override with
-# --model.
+# chat-tier choice (e.g. defaults.model: light). Models are pinned inside
+# the provider scripts; --model is accepted on the CLI but logged as
+# ignored. Music selects between two static endpoints via --length clip|full.
 #
 # Usage:
 #   generate.sh "<text or music prompt>"
 #               [--mode music|speech]   (default: speech)
-#               [--model NAME]
+#               [--model NAME]          (accepted but ignored — models are pinned)
+#               [--length clip|full]    (music only; default: full)
 #               [--voice NAME]          (TTS only)
 #               [--format FMT]
-#               [--speed N]             (OpenAI TTS only)
+#               [--speed N]             (TTS only; ignored by gpt-4o-mini-tts)
 #               [--output PATH]
 #               [--input-file PATH]
 #
@@ -34,6 +35,7 @@ TEXT=""
 INPUT_FILE=""
 MODE="speech"
 MODEL=""
+LENGTH=""
 VOICE=""
 FORMAT=""
 SPEED=""
@@ -43,13 +45,14 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --mode)       MODE="${2:-}";       shift 2 ;;
         --model)      MODEL="${2:-}";      shift 2 ;;
+        --length)     LENGTH="${2:-}";     shift 2 ;;
         --voice)      VOICE="${2:-}";      shift 2 ;;
         --format)     FORMAT="${2:-}";     shift 2 ;;
         --speed)      SPEED="${2:-}";      shift 2 ;;
         --output)     OUTPUT="${2:-}";     shift 2 ;;
         --input-file) INPUT_FILE="${2:-}"; shift 2 ;;
         --help|-h)
-            sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         --) shift; TEXT="${1:-$TEXT}"; shift || true ;;
@@ -90,19 +93,33 @@ if [ -z "$PROVIDER" ]; then
     exit 1
 fi
 
-# Pick a sensible audio model when the user did not pass --model.
-# These are not in the config; the config tracks the chat-tier model only.
-if [ -z "$MODEL" ]; then
-    case "$PROVIDER:$MODE" in
-        openai:speech)  MODEL="tts-1-hd" ;;
-        gemini:speech)  MODEL="gemini-2.5-flash-preview-tts" ;;
-        gemini:music)   MODEL="lyria-3-pro-preview" ;;
-        google:speech)  MODEL="gemini-2.5-flash-preview-tts" ;;
-        google:music)   MODEL="lyria-3-pro-preview" ;;
-        openai:music)   MODEL="" ;;       # unsupported; rejected below
-        anthropic:*)    MODEL="" ;;       # unsupported; rejected below
-        *)              MODEL="" ;;
-    esac
+# All provider×mode combos that this skill actually dispatches now pin their
+# endpoint+model inside the child script. Warn once if the user explicitly
+# passed --model so they understand it has no effect, then clear MODEL.
+case "$PROVIDER:$MODE" in
+    openai:speech)
+        if [ -n "$MODEL" ]; then
+            echo "generate.sh: --model is ignored for openai speech; this skill is pinned to gpt-4o-mini-tts." >&2
+        fi
+        MODEL=""
+        ;;
+    gemini:speech|google:speech)
+        if [ -n "$MODEL" ]; then
+            echo "generate.sh: --model is ignored for gemini speech; this skill is pinned to gemini-3.1-flash-tts-preview." >&2
+        fi
+        MODEL=""
+        ;;
+    gemini:music|google:music)
+        if [ -n "$MODEL" ]; then
+            echo "generate.sh: --model is ignored for gemini music; use --length clip|full to pick the pinned endpoint." >&2
+        fi
+        MODEL=""
+        ;;
+esac
+
+# Default --length for music mode.
+if [ "$MODE" = "music" ] && [ -z "$LENGTH" ]; then
+    LENGTH="full"
 fi
 
 # Format default (HD-equivalent per mode + model).
@@ -128,9 +145,10 @@ case "$PROVIDER" in
 generate.sh: provider 'anthropic' does not support audio generation.
 Anthropic's Claude models can analyze audio but cannot produce it.
 Edit $CONFIG_FILE and set 'defaults.provider:' to 'openai' or 'gemini'.
-Audio-capable defaults this skill will pick:
-  - speech: tts-1-hd (openai), gemini-2.5-flash-preview-tts (gemini)
-  - music:  lyria-3-pro-preview (gemini only — OpenAI has no music API)
+Audio-capable models (all pinned at static endpoints):
+  - speech: gpt-4o-mini-tts (openai), gemini-3.1-flash-tts-preview (gemini)
+  - music:  lyria-3-pro-preview (--length full) or lyria-3-clip-preview
+            (--length clip); gemini only — OpenAI has no music API
 EOF
         exit 2
         ;;
@@ -138,14 +156,15 @@ EOF
         if [ "$MODE" = "music" ]; then
             cat >&2 <<EOF
 generate.sh: OpenAI does not have a music generation API.
-Run with --mode speech (or omit --mode), or switch defaults.provider to 'gemini'
-to use Lyria 3 (default model: lyria-3-pro-preview).
+Run with --mode speech (or omit --mode) — pinned to gpt-4o-mini-tts — or
+switch defaults.provider to 'gemini' to use Lyria 3 (--length full pins
+to lyria-3-pro-preview, --length clip pins to lyria-3-clip-preview).
 EOF
             exit 2
         fi
+        # Endpoint + model are pinned inside openai_tts.sh (gpt-4o-mini-tts).
         exec bash "$SCRIPT_DIR/openai_tts.sh" \
             --config "$CONFIG_FILE" \
-            --model  "$MODEL" \
             --voice  "$VOICE" \
             --format "$FORMAT" \
             --speed  "$SPEED" \
@@ -154,16 +173,17 @@ EOF
         ;;
     gemini|google)
         if [ "$MODE" = "music" ]; then
+            # Endpoint + model are pinned inside gemini_music.sh (static URLs).
             exec bash "$SCRIPT_DIR/gemini_music.sh" \
                 --config "$CONFIG_FILE" \
-                --model  "$MODEL" \
+                --length "$LENGTH" \
                 --format "$FORMAT" \
                 --output "$OUTPUT" \
                 -- "$TEXT"
         else
+            # Endpoint + model are pinned inside gemini_tts.sh (static URL).
             exec bash "$SCRIPT_DIR/gemini_tts.sh" \
                 --config "$CONFIG_FILE" \
-                --model  "$MODEL" \
                 --voice  "$VOICE" \
                 --format "$FORMAT" \
                 --output "$OUTPUT" \

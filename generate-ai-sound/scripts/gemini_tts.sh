@@ -2,10 +2,14 @@
 # gemini_tts.sh — Google Gemini text-to-speech.
 # Called by generate.sh; not meant to be invoked directly.
 #
+# Endpoint and model are STATIC. Per the official REST docs at
+# https://ai.google.dev/gemini-api/docs/speech-generation this skill is
+# pinned to gemini-3.1-flash-tts-preview, the recommended primary model.
+#
 # Gemini TTS returns 24 kHz / 16-bit / mono PCM as base64 inside JSON.
-# We decode the base64, prepend a 44-byte WAV/RIFF header, and write the
-# result to the output path so it plays in any standard audio player —
-# without depending on ffmpeg or sox, which the embedded target may lack.
+# We decode the base64 and prepend a 44-byte WAV/RIFF header so the file
+# plays in any standard audio player without depending on ffmpeg or sox
+# (which the embedded target may not have).
 
 set -eu
 
@@ -13,8 +17,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=parse_yaml.sh
 . "$SCRIPT_DIR/parse_yaml.sh"
 
+# --- Static endpoint and model (do not parameterize) ---
+GEMINI_TTS_MODEL="gemini-3.1-flash-tts-preview"
+GEMINI_TTS_ENDPOINT="https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-tts-preview:generateContent"
+
 CONFIG_FILE=""
-MODEL=""
 VOICE=""
 FORMAT="wav"
 OUTPUT=""
@@ -23,10 +30,10 @@ TEXT=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --config) CONFIG_FILE="$2"; shift 2 ;;
-        --model)  MODEL="$2";       shift 2 ;;
         --voice)  VOICE="$2";       shift 2 ;;
         --format) FORMAT="$2";      shift 2 ;;
         --output) OUTPUT="$2";      shift 2 ;;
+        --model)  shift 2 ;;   # accepted for parent compat; ignored — model is fixed
         --) shift; TEXT="$*"; break ;;
         *)  echo "gemini_tts.sh: unexpected arg: $1" >&2; exit 1 ;;
     esac
@@ -38,10 +45,6 @@ if [ -z "$API_KEY" ]; then
     echo "Set providers.gemini.api_key in $CONFIG_FILE before invoking this skill." >&2
     exit 1
 fi
-
-# Google Gemini TTS always uses the official endpoint.
-# https://ai.google.dev/gemini-api/docs/speech-generation
-BASE_URL="https://generativelanguage.googleapis.com"
 
 [ -z "$VOICE" ] && VOICE="Kore"
 
@@ -65,14 +68,12 @@ cat > "$REQUEST_FILE" <<EOF
 {"contents":[{"parts":[{"text":"$ESCAPED_TEXT"}]}],"generationConfig":{"responseModalities":["AUDIO"],"speechConfig":{"voiceConfig":{"prebuiltVoiceConfig":{"voiceName":"$VOICE"}}}}}
 EOF
 
-ENDPOINT="$BASE_URL/v1beta/models/${MODEL}:generateContent"
-
 HTTP_CODE="$(curl -sS -w '%{http_code}' -o "$RESPONSE_FILE" \
-    "$ENDPOINT" \
+    "$GEMINI_TTS_ENDPOINT" \
     -H "x-goog-api-key: $API_KEY" \
     -H "Content-Type: application/json" \
     --data-binary @"$REQUEST_FILE")" || {
-    echo "gemini_tts.sh: curl failed talking to $BASE_URL" >&2
+    echo "gemini_tts.sh: curl failed talking to $GEMINI_TTS_ENDPOINT" >&2
     exit 1
 }
 
@@ -103,7 +104,7 @@ printf '%s' "$B64" | base64 -d > "$PCM_FILE" || {
 # If user asked for raw PCM, write straight through and stop.
 if [ "$FORMAT" = "pcm" ]; then
     cp "$PCM_FILE" "$OUTPUT"
-    echo "Audio saved to: $OUTPUT (voice=$VOICE, model=$MODEL, format=pcm, 24kHz/16-bit/mono)"
+    echo "Audio saved to: $OUTPUT (voice=$VOICE, model=$GEMINI_TTS_MODEL, format=pcm, 24kHz/16-bit/mono)"
     exit 0
 fi
 
@@ -146,4 +147,4 @@ emit_le() {
     cat "$PCM_FILE"
 } > "$OUTPUT"
 
-echo "Audio saved to: $OUTPUT (voice=$VOICE, model=$MODEL, format=wav, 24kHz/16-bit/mono)"
+echo "Audio saved to: $OUTPUT (voice=$VOICE, model=$GEMINI_TTS_MODEL, format=wav, 24kHz/16-bit/mono)"

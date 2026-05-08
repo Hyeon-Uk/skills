@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # openai_generate.sh — OpenAI image generation.
 # Called by generate.sh; not meant to be invoked directly by users.
+#
+# Endpoint and model are STATIC. The skill targets OpenAI's
+# /v1/images/generations REST endpoint with model `gpt-image-1`, the most
+# capable image model in the OpenAI API. The full URL is hardcoded so
+# callers cannot redirect this script at a different model.
 
 set -eu
 
@@ -8,8 +13,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=parse_yaml.sh
 . "$SCRIPT_DIR/parse_yaml.sh"
 
+# --- Static endpoint and model (do not parameterize) ---
+OPENAI_IMAGE_MODEL="gpt-image-1"
+OPENAI_IMAGE_ENDPOINT="https://api.openai.com/v1/images/generations"
+
 CONFIG_FILE=""
-MODEL=""
 QUALITY=""
 SIZE="1024x1024"
 OUTPUT=""
@@ -18,10 +26,10 @@ PROMPT=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --config)  CONFIG_FILE="$2"; shift 2 ;;
-        --model)   MODEL="$2";       shift 2 ;;
         --quality) QUALITY="$2";     shift 2 ;;
         --size)    SIZE="$2";        shift 2 ;;
         --output)  OUTPUT="$2";      shift 2 ;;
+        --model)   shift 2 ;;   # accepted for parent compat; ignored — model is fixed
         --) shift; PROMPT="$*"; break ;;
         *)  echo "openai_generate.sh: unexpected arg: $1" >&2; exit 1 ;;
     esac
@@ -34,20 +42,15 @@ if [ -z "$API_KEY" ]; then
     exit 1
 fi
 
-# OpenAI image generation always uses the official endpoint.
-# https://platform.openai.com/docs/api-reference/images/create
-BASE_URL="https://api.openai.com"
-
-# HD-equivalent default per model when caller did not specify quality.
-# dall-e-2 has no quality knob; we send no field at all.
-if [ -z "$QUALITY" ]; then
-    case "$MODEL" in
-        dall-e-3)     QUALITY="hd" ;;
-        gpt-image-1)  QUALITY="high" ;;
-        dall-e-2)     QUALITY="" ;;
-        *)            QUALITY="high" ;;  # safe modern default
-    esac
-fi
+# gpt-image-1 quality vocabulary: low | medium | high | auto.
+# Map common HD-equivalent aliases so the parent's --quality survives.
+case "${QUALITY:-}" in
+    ""|hd|HD)   QUALITY="high" ;;
+    standard)   QUALITY="medium" ;;
+    low|medium|high|auto) ;;
+    *) echo "openai_generate.sh: --quality '$QUALITY' not recognized for gpt-image-1; using 'high'." >&2
+       QUALITY="high" ;;
+esac
 
 ESCAPED_PROMPT="$(json_escape "$PROMPT")"
 
@@ -55,40 +58,17 @@ REQUEST_FILE="$(mktemp)"
 RESPONSE_FILE="$(mktemp)"
 trap 'rm -f "$REQUEST_FILE" "$RESPONSE_FILE"' EXIT
 
-# dall-e-3 returns URLs by default; ask for b64 so we don't need a second curl.
-# gpt-image-1 always returns b64_json regardless of response_format.
-# dall-e-2 supports b64_json too.
-case "$MODEL" in
-    dall-e-2)
-        cat > "$REQUEST_FILE" <<EOF
-{"model":"$MODEL","prompt":"$ESCAPED_PROMPT","n":1,"size":"$SIZE","response_format":"b64_json"}
+# gpt-image-1 always returns b64_json; no response_format field accepted.
+cat > "$REQUEST_FILE" <<EOF
+{"model":"$OPENAI_IMAGE_MODEL","prompt":"$ESCAPED_PROMPT","n":1,"size":"$SIZE","quality":"$QUALITY"}
 EOF
-        ;;
-    dall-e-3)
-        cat > "$REQUEST_FILE" <<EOF
-{"model":"$MODEL","prompt":"$ESCAPED_PROMPT","n":1,"size":"$SIZE","quality":"$QUALITY","response_format":"b64_json"}
-EOF
-        ;;
-    *)
-        # gpt-image-1 and successors: no response_format field accepted.
-        if [ -n "$QUALITY" ]; then
-            cat > "$REQUEST_FILE" <<EOF
-{"model":"$MODEL","prompt":"$ESCAPED_PROMPT","n":1,"size":"$SIZE","quality":"$QUALITY"}
-EOF
-        else
-            cat > "$REQUEST_FILE" <<EOF
-{"model":"$MODEL","prompt":"$ESCAPED_PROMPT","n":1,"size":"$SIZE"}
-EOF
-        fi
-        ;;
-esac
 
 HTTP_CODE="$(curl -sS -w '%{http_code}' -o "$RESPONSE_FILE" \
-    "$BASE_URL/v1/images/generations" \
+    "$OPENAI_IMAGE_ENDPOINT" \
     -H "Authorization: Bearer $API_KEY" \
     -H "Content-Type: application/json" \
     --data-binary @"$REQUEST_FILE")" || {
-    echo "openai_generate.sh: curl failed talking to $BASE_URL" >&2
+    echo "openai_generate.sh: curl failed talking to $OPENAI_IMAGE_ENDPOINT" >&2
     exit 1
 }
 
@@ -106,17 +86,6 @@ B64="$(tr -d '\n\r' < "$RESPONSE_FILE" \
     | head -1)"
 
 if [ -z "$B64" ]; then
-    URL="$(tr -d '\n\r' < "$RESPONSE_FILE" \
-        | sed -n 's/.*"url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
-        | head -1)"
-    if [ -n "$URL" ]; then
-        curl -sS -o "$OUTPUT" "$URL" || {
-            echo "openai_generate.sh: failed to download image from $URL" >&2
-            exit 1
-        }
-        echo "Image saved to: $OUTPUT"
-        exit 0
-    fi
     echo "openai_generate.sh: could not extract image data from response" >&2
     cat "$RESPONSE_FILE" >&2
     exit 1
@@ -127,4 +96,4 @@ printf '%s' "$B64" | base64 -d > "$OUTPUT" || {
     exit 1
 }
 
-echo "Image saved to: $OUTPUT"
+echo "Image saved to: $OUTPUT (model=$OPENAI_IMAGE_MODEL, quality=$QUALITY)"

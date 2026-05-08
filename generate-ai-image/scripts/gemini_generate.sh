@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
-# gemini_generate.sh — Google Gemini / Imagen image generation.
+# gemini_generate.sh — Google Gemini image generation.
 # Called by generate.sh; not meant to be invoked directly.
+#
+# Endpoint and model are STATIC. The official REST docs at
+# https://ai.google.dev/gemini-api/docs/image-generation pin this skill to
+# gemini-3.1-flash-image-preview, the recommended default. The full URL is
+# hardcoded so callers cannot redirect this script at a different model.
 
 set -eu
 
@@ -8,9 +13,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=parse_yaml.sh
 . "$SCRIPT_DIR/parse_yaml.sh"
 
+# --- Static endpoint and model (do not parameterize) ---
+GEMINI_IMAGE_MODEL="gemini-3.1-flash-image-preview"
+GEMINI_IMAGE_ENDPOINT="https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent"
+
 CONFIG_FILE=""
-MODEL=""
-QUALITY=""
 SIZE="1024x1024"
 OUTPUT=""
 PROMPT=""
@@ -18,10 +25,9 @@ PROMPT=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --config)  CONFIG_FILE="$2"; shift 2 ;;
-        --model)   MODEL="$2";       shift 2 ;;
-        --quality) QUALITY="$2";     shift 2 ;;
         --size)    SIZE="$2";        shift 2 ;;
         --output)  OUTPUT="$2";      shift 2 ;;
+        --model|--quality) shift 2 ;;   # accepted for parent compat; ignored — model is fixed
         --) shift; PROMPT="$*"; break ;;
         *)  echo "gemini_generate.sh: unexpected arg: $1" >&2; exit 1 ;;
     esac
@@ -34,11 +40,7 @@ if [ -z "$API_KEY" ]; then
     exit 1
 fi
 
-# Google Gemini / Imagen always use the official endpoint.
-# https://ai.google.dev/gemini-api/docs/image-generation
-BASE_URL="https://generativelanguage.googleapis.com"
-
-# Map WxH to Imagen aspect ratio. Only the ratio matters; pixel dims are ignored.
+# Map WxH to a Gemini imageConfig.aspectRatio. Pixel dims are otherwise ignored.
 ASPECT="1:1"
 case "$SIZE" in
     *x*)
@@ -60,45 +62,17 @@ REQUEST_FILE="$(mktemp)"
 RESPONSE_FILE="$(mktemp)"
 trap 'rm -f "$REQUEST_FILE" "$RESPONSE_FILE"' EXIT
 
-# Imagen 4 supports imageSize ("1K"|"2K"); Imagen 3 does not.
-# HD default for Imagen 4 = "2K"; user-supplied --quality maps high->2K, others->1K.
-IMAGE_SIZE_FIELD=""
-case "$MODEL" in
-    imagen-4*|imagen-4.0-*)
-        case "${QUALITY:-}" in
-            ""|high|hd) IMAGE_SIZE_FIELD=',"imageSize":"2K"' ;;
-            *)          IMAGE_SIZE_FIELD=',"imageSize":"1K"' ;;
-        esac
-        ;;
-esac
-
-case "$MODEL" in
-    imagen-*)
-        cat > "$REQUEST_FILE" <<EOF
-{"instances":[{"prompt":"$ESCAPED_PROMPT"}],"parameters":{"sampleCount":1,"aspectRatio":"$ASPECT"$IMAGE_SIZE_FIELD}}
-EOF
-        ENDPOINT="$BASE_URL/v1beta/models/${MODEL}:predict"
-        RESPONSE_KEY="bytesBase64Encoded"
-        ;;
-    *)
-        # Gemini image-generation models (e.g. gemini-2.5-flash-image, gemini-3-pro-image-preview,
-        # gemini-3.1-flash-image-preview). They use generateContent with responseModalities.
-        # Per the official docs, send ["TEXT","IMAGE"] — some models reject ["IMAGE"] alone.
-        # Aspect ratio goes in generationConfig.imageConfig (separate from Imagen's "parameters").
-        cat > "$REQUEST_FILE" <<EOF
+# Per the official docs, send ["TEXT","IMAGE"] — some image models reject ["IMAGE"] alone.
+cat > "$REQUEST_FILE" <<EOF
 {"contents":[{"parts":[{"text":"$ESCAPED_PROMPT"}]}],"generationConfig":{"responseModalities":["TEXT","IMAGE"],"imageConfig":{"aspectRatio":"$ASPECT"}}}
 EOF
-        ENDPOINT="$BASE_URL/v1beta/models/${MODEL}:generateContent"
-        RESPONSE_KEY="data"
-        ;;
-esac
 
 HTTP_CODE="$(curl -sS -w '%{http_code}' -o "$RESPONSE_FILE" \
-    "$ENDPOINT" \
+    "$GEMINI_IMAGE_ENDPOINT" \
     -H "x-goog-api-key: $API_KEY" \
     -H "Content-Type: application/json" \
     --data-binary @"$REQUEST_FILE")" || {
-    echo "gemini_generate.sh: curl failed talking to $BASE_URL" >&2
+    echo "gemini_generate.sh: curl failed talking to $GEMINI_IMAGE_ENDPOINT" >&2
     exit 1
 }
 
@@ -110,19 +84,8 @@ if [ "$HTTP_CODE" != "200" ]; then
 fi
 
 B64="$(tr -d '\n\r' < "$RESPONSE_FILE" \
-    | sed -n "s/.*\"${RESPONSE_KEY}\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" \
+    | sed -n 's/.*"data"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
     | head -1)"
-
-# Fallback: try the other key in case the model family was misclassified.
-if [ -z "$B64" ]; then
-    for alt in bytesBase64Encoded data; do
-        [ "$alt" = "$RESPONSE_KEY" ] && continue
-        B64="$(tr -d '\n\r' < "$RESPONSE_FILE" \
-            | sed -n "s/.*\"${alt}\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" \
-            | head -1)"
-        [ -n "$B64" ] && break
-    done
-fi
 
 if [ -z "$B64" ]; then
     echo "gemini_generate.sh: could not extract image data from response" >&2
@@ -135,4 +98,4 @@ printf '%s' "$B64" | base64 -d > "$OUTPUT" || {
     exit 1
 }
 
-echo "Image saved to: $OUTPUT"
+echo "Image saved to: $OUTPUT (model=$GEMINI_IMAGE_MODEL)"

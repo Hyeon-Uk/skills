@@ -1,7 +1,7 @@
 ---
 name: generate-ai-sound
-description: Generates audio from text — music (Google Gemini Lyria 3) or speech (OpenAI TTS, Gemini TTS). Reads API keys from /home/owner/.carbon/config.yaml. Provider is chosen by request type: music always routes to gemini (only Lyria supports music); speech prefers defaults.provider but auto-falls back to gemini or openai if the active provider is anthropic. Accepts --model to override the default model. Pure shell + curl, no Python/Node required. Trigger when the user asks to compose music, generate a song/jingle/tune/backing track, read text aloud, narrate, generate a voiceover, or synthesize speech. Always tell the user which provider was selected.
-argument-hint: "[--mode music|speech] [--model NAME] [--voice NAME] [--output PATH]"
+description: Generates audio from text — music (Google Gemini Lyria 3) or speech (OpenAI TTS, Gemini TTS). Reads API keys from /home/owner/.carbon/config.yaml. Provider is chosen by request type: music always routes to gemini (only Lyria supports music); speech prefers defaults.provider but auto-falls back to gemini or openai if the active provider is anthropic. All endpoints+models are pinned: openai speech → gpt-4o-mini-tts; gemini speech → gemini-3.1-flash-tts-preview; gemini music → lyria-3-pro-preview (--length full) or lyria-3-clip-preview (--length clip). --model is accepted but ignored with a warning. Pure shell + curl, no Python/Node required. Trigger when the user asks to compose music, generate a song/jingle/tune/backing track, read text aloud, narrate, generate a voiceover, or synthesize speech. Always tell the user which provider was selected.
+argument-hint: "[--mode music|speech] [--length clip|full] [--model NAME] [--voice NAME] [--output PATH]"
 user-invocable: true
 allowed-tools: true
 ---
@@ -44,20 +44,23 @@ bash <skill-dir>/scripts/generate.sh "<text or music prompt>" [OPTIONS]
 | Option | Default | Modes | Description |
 |--------|---------|-------|-------------|
 | `--mode music\|speech` | `speech` | both | Select music or speech generation |
-| `--model NAME` | per (provider, mode) | both | Override the default model |
+| `--model NAME` | (pinned per provider × mode) | both | Accepted but ignored with a warning |
+| `--length clip\|full` | `full` | music only | Pick the static Lyria endpoint: `clip`=lyria-3-clip-preview (~30s), `full`=lyria-3-pro-preview (multi-minute) |
 | `--voice NAME` | `alloy` (OpenAI), `Kore` (Gemini) | TTS only | Voice for speech synthesis |
 | `--format FMT` | `wav` (TTS), `mp3` (Lyria) | both | Output audio format |
-| `--speed N` | `1.0` | OpenAI TTS only | Speech speed (0.25–4.0) |
+| `--speed N` | `1.0` | OpenAI TTS only | Speech speed — note: gpt-4o-mini-tts ignores this; warning is logged |
 | `--output PATH` | `./audio_<timestamp>.<ext>` | both | Output file path |
 | `--input-file PATH` | (positional text used) | TTS only | Read text from a file |
 | `-h`, `--help` | | | Show help message |
 
-### Default Models per Provider and Mode
+### Pinned Models per Provider and Mode
 
-| Provider | `--mode speech` default | `--mode music` default |
+| Provider | `--mode speech` (pinned) | `--mode music` (pinned) |
 |---|---|---|
-| `openai` | `tts-1-hd` | N/A |
-| `gemini` | `gemini-2.5-flash-preview-tts` | `lyria-3-pro-preview` |
+| `openai` | `gpt-4o-mini-tts` | N/A |
+| `gemini` | `gemini-3.1-flash-tts-preview` | `--length full` → `lyria-3-pro-preview`<br>`--length clip` → `lyria-3-clip-preview` |
+
+All four endpoint URLs and model IDs are baked into the child scripts as constants. Music alone has two fixed endpoints, selected via `--length`. `--model` is accepted on the CLI but logged as ignored.
 
 ### Voices (TTS only)
 
@@ -142,8 +145,11 @@ The skill reads `defaults.provider` and `providers.<defaults.provider>.api_key`.
 ## Examples
 
 ```bash
-# Generate music (always uses Gemini/Lyria)
+# Generate music (always uses Gemini/Lyria; default --length full → lyria-3-pro-preview)
 bash generate.sh "upbeat electronic dance track with synth leads" --mode music
+
+# Short ~30s clip (Lyria 3 clip endpoint)
+bash generate.sh "lo-fi hip-hop loop, dusty piano, light vinyl crackle" --mode music --length clip
 
 # Generate speech with default provider
 bash generate.sh "Hello, welcome to our podcast." --mode speech
@@ -161,14 +167,15 @@ bash generate.sh "Background music for video" --mode music --output /tmp/bgm.mp3
 # Read from file for long passages
 bash generate.sh --mode speech --input-file /tmp/script.txt --output /tmp/narration.wav
 
-# Adjust speech speed (OpenAI only)
+# Adjust speech speed (OpenAI tts-1/tts-1-hd only — gpt-4o-mini-tts ignores it)
+# This skill is pinned to gpt-4o-mini-tts, so --speed is logged as ignored
 bash generate.sh "Slow down this text" --mode speech --speed 0.75
 ```
 
 ## Files
 
 - `scripts/generate.sh` — orchestrator
-- `scripts/openai_tts.sh` — OpenAI text-to-speech
-- `scripts/gemini_tts.sh` — Gemini text-to-speech (PCM → WAV)
+- `scripts/openai_tts.sh` — OpenAI text-to-speech (static endpoint + model)
+- `scripts/gemini_tts.sh` — Gemini text-to-speech (PCM → WAV; static endpoint + model)
 - `scripts/gemini_music.sh` — Google Lyria 3 music generation
 - `scripts/parse_yaml.sh` — YAML helpers

@@ -1,6 +1,6 @@
 ---
 name: generate-ai-image
-description: Generates images via OpenAI (DALL-E, gpt-image-1) or Google Gemini (Imagen). Reads provider and API key from /home/owner/.carbon/config.yaml. Picks default model per provider (gpt-image-1 for openai, imagen-4.0-generate-001 for gemini); accepts --model to override. Pure shell + curl, no Python/Node required. Requires providers.<active-provider>.api_key in config.yaml. Trigger when the user asks to create, generate, draw, render, or make an image; mentions DALL-E, Imagen, gpt-image, or text-to-image; or references their Carbon config provider. Returns an error if defaults.provider is anthropic (Anthropic has no image API).
+description: Generates images via OpenAI (gpt-image-1) or Google Gemini (gemini-3.1-flash-image-preview). Reads provider and API key from /home/owner/.carbon/config.yaml. Both providers are pinned to static endpoint+model — --model is accepted but ignored with a warning. Pure shell + curl, no Python/Node required. Requires providers.<active-provider>.api_key in config.yaml. Trigger when the user asks to create, generate, draw, render, or make an image; mentions gpt-image, Gemini image, or text-to-image; or references their Carbon config provider. Returns an error if defaults.provider is anthropic (Anthropic has no image API).
 argument-hint: "[--model NAME] [--quality LEVEL] [--output PATH] [--size WxH]"
 user-invocable: true
 allowed-tools: true
@@ -27,8 +27,9 @@ If the key is missing or empty, the provider script exits non-zero with a messag
 | "Save the image to /tmp/banner.png" | `generate.sh --output` | `bash generate.sh "prompt" --output /tmp/banner.png` |
 
 **When to use `--quality`:**
-- **Default (no flag)**: HD-equivalent quality for the active model (`hd` for dall-e-3, `high` for gpt-image-1, `2K` for imagen-4)
-- **`--quality low|medium|standard`**: Use only when the user explicitly opts out of HD ("quick draft", "low-res is fine", "save credits")
+- **Default (no flag)**: HD-equivalent (`high` for gpt-image-1)
+- **OpenAI/`gpt-image-1`** accepts: `low | medium | high | auto`. Aliases `hd`→`high`, `standard`→`medium` are mapped automatically.
+- **Gemini**: `--quality` is accepted but ignored — the pinned model has no quality knob
 
 ## CLI Usage
 
@@ -40,24 +41,24 @@ bash <skill-dir>/scripts/generate.sh "<prompt>" [OPTIONS]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--model NAME` | per-provider default | Override the default image model |
-| `--quality LEVEL` | HD-equivalent | Quality level (hd, high, low, medium, standard) |
+| `--model NAME` | (pinned per provider) | Accepted but ignored with a warning |
+| `--quality LEVEL` | `high` (gpt-image-1) | Quality level — see "When to use `--quality`" above |
 | `--output PATH` | `./image_<timestamp>.png` | Output file path |
 | `--size WxH` | `1024x1024` | Image dimensions |
 | `-h`, `--help` | | Show help message |
 
-### Default Models per Provider
+### Pinned Models per Provider
 
-| `defaults.provider` | Default `--model` |
-|---|---|
-| `openai` | `gpt-image-1` |
-| `gemini` | `imagen-4.0-generate-001` |
-| `anthropic` | (rejected — no image API) |
+| `defaults.provider` | Model (pinned at static endpoint) | `--model` override? |
+|---|---|---|
+| `openai` | `gpt-image-1` | no — ignored with a warning |
+| `gemini` | `gemini-3.1-flash-image-preview` | no — ignored with a warning |
+| `anthropic` | (rejected — no image API) | n/a |
 
 ### Size Options by Provider
 
 **OpenAI:** `1024x1024`, `1024x1536`, `1536x1024`, `auto`
-**Gemini/Imagen:** Converted to aspect ratio automatically
+**Gemini:** Converted to aspect ratio automatically (1:1, 16:9, 4:3, 9:16, 3:4)
 
 ## Output
 
@@ -111,8 +112,8 @@ It deliberately **does not** read `defaults.model` (that's the chat tier in carb
 
 | `defaults.provider` | Behavior |
 |---|---|
-| `openai` | dispatch to `openai_generate.sh`; default model `gpt-image-1` |
-| `gemini` | dispatch to `gemini_generate.sh`; default model `imagen-4.0-generate-001` |
+| `openai` | dispatch to `openai_generate.sh`; static endpoint+model `gpt-image-1` |
+| `gemini` | dispatch to `gemini_generate.sh`; static endpoint+model `gemini-3.1-flash-image-preview` |
 | `anthropic` | exit code 2 with error message — Anthropic does not provide an image generation API |
 
 ## Edge Cases
@@ -132,8 +133,8 @@ It deliberately **does not** read `defaults.model` (that's the chat tier in carb
 # Basic usage with default model
 bash generate.sh "a serene mountain landscape at sunset"
 
-# Specify a different model
-bash generate.sh "cyberpunk city" --model dall-e-3
+# --model is accepted but ignored (model is pinned per-provider)
+bash generate.sh "cyberpunk city"
 
 # Custom size and output path
 bash generate.sh "panoramic ocean view" --size 1536x1024 --output /tmp/panorama.png
@@ -141,14 +142,14 @@ bash generate.sh "panoramic ocean view" --size 1536x1024 --output /tmp/panorama.
 # Lower quality to save credits
 bash generate.sh "quick sketch of a cat" --quality low
 
-# Use Gemini/Imagen
+# Use Gemini (pinned to gemini-3.1-flash-image-preview; --model is ignored)
 # First set defaults.provider: gemini in config.yaml
-bash generate.sh "abstract art in blue tones" --model imagen-3.0-generate-002
+bash generate.sh "abstract art in blue tones"
 ```
 
 ## Files
 
 - `scripts/generate.sh` — orchestrator
-- `scripts/openai_generate.sh` — OpenAI implementation
-- `scripts/gemini_generate.sh` — Gemini/Imagen implementation
+- `scripts/openai_generate.sh` — OpenAI image implementation (static endpoint + model)
+- `scripts/gemini_generate.sh` — Gemini image implementation (static endpoint + model)
 - `scripts/parse_yaml.sh` — YAML helpers (sourced by the others)
