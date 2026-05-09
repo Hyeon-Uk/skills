@@ -1,20 +1,21 @@
 ---
 name: tizen-refactoring
-description: Drive the multi-agent per-task refactoring pipeline end-to-end for any Tizen AppFW C/C++ package — refiner → planner → architect → developer → tester → reviewer → committer with supervisor checkpoints between every stage and a debugger side-channel for GBS build failures. Invoke once and it loops until the active task is committed or escalates. Use whenever the user wants to "execute the next task", "run the per-task pipeline", "refactor <package>", "advance to the next task", "리팩토링 진행해줘", "다음 task 실행", "release 커밋 만들기", or any cross-stage refactor work on a Tizen package under `~/tizen/gerrit/`. Triggers on /tizen-refactoring.
+description: Drive the multi-agent per-task refactoring pipeline end-to-end for any Tizen AppFW C/C++ package — refiner → planner → architect → test-scenario-generator → developer → tester → reviewer → committer with supervisor checkpoints between every stage and a debugger side-channel for GBS build failures. Invoke once and it loops until the active task is committed or escalates. Use whenever the user wants to "execute the next task", "run the per-task pipeline", "refactor <package>", "advance to the next task", "리팩토링 진행해줘", "다음 task 실행", "release 커밋 만들기", or any cross-stage refactor work on a Tizen package under `~/tizen/gerrit/`. Triggers on /tizen-refactoring.
 ---
 
 # `/tizen-refactoring` — Drive the per-task pipeline end-to-end
 
 This is the **director** for the multi-agent refactoring pipeline.
 One invocation runs the loop: refiner → planner → architect →
-developer → tester → reviewer → committer, with `/supervisor`
-checkpoints between every stage and a `/debugger` side-channel for
-GBS build failures. It keeps looping until the active task either
-lands a Release-ready commit set or escalates to the user.
+test-scenario-generator → developer → tester → reviewer →
+committer, with `/supervisor` checkpoints between every stage and
+a `/debugger` side-channel for GBS build failures. It keeps
+looping until the active task either lands a Release-ready commit
+set or escalates to the user.
 
 The role skills do the work; this skill *sequences* them, infers
 where in the pipeline the project currently sits, routes bounces,
-and enforces four non-negotiable flows:
+and enforces five non-negotiable flows:
 
 1. **GBS build break → `/debugger` first**, then route per its
    `bounce_to:`. Never debug a cascade by guessing.
@@ -29,6 +30,22 @@ and enforces four non-negotiable flows:
    every (symbol, scenario) pair in the planner's `### API
    surface` has a corresponding `EXPECT_*` / `ASSERT_*` in the
    diff before the developer hands off to the tester.
+5. **Scenario inventory before any test code** — the
+   `/test-scenario-generator` skill must run after `/architect`
+   and before `/developer` writes any test, producing a
+   `## Test scenarios` section in LOG with the
+   `[P]/[N]/[E]/[C]` rows that subsequent tests will mirror.
+   This applies in both directions:
+   - **Baseline / lock-in** for an existing-code refactor —
+     scenarios are read off the *current source*, and the
+     lock-in tests assert today's behavior before any refactor
+     commit lands.
+   - **TDD for new functionality** — scenarios are derived from
+     the architect's `## Design` and the planner's `### API
+     surface` (the contract the new code will satisfy), and the
+     developer's TDD red phase writes one failing test per row
+     before any production code is written.
+   No test code is written until that inventory exists.
 
 Read alongside the project's `rules.md`, `workflow.md`, and the
 per-role skills installed at `~/.claude/skills/<role>/`.
@@ -73,7 +90,8 @@ by the table:
 | `## Supervisor checkpoints` ending in `next_stage: <X>` | `/<X>` | supervisor told you |
 | `## Refined prompt` | `/supervisor` | post-refiner check |
 | `## Execution plan` | `/supervisor` | post-planner check |
-| `## Design` | `/supervisor` | post-architect check |
+| `## Design` | `/supervisor` | post-architect check (supervisor next_stage = `test-scenario-generator`) |
+| `## Test scenarios` | `/supervisor` | post-scenario-generator check (supervisor next_stage = `developer` with `stage=lock-in`) |
 | `## Developer log` | `/tester` | run verification (supervisor implicit before/after) |
 | `## Tester report` ending in PASS | `/reviewer` | diff review |
 | `## Tester report` ending in FAIL with parseable `[ FAILED ]` | `/developer` | clean test fail — code bug |
@@ -102,7 +120,7 @@ The role skill reads the log, does its work, appends its
 section, and returns. **Do not interleave your own analysis
 between roles** — let each role own its section.
 
-### Step 3 — Apply the four critical flows
+### Step 3 — Apply the five critical flows
 
 The flows below override the simple table when they apply.
 Check each one *before* invoking the next role:
@@ -157,27 +175,42 @@ the Release commit lands:
    invoked to author the Release commit.
 ```
 
-#### Flow C — Lock-in cycle FIRST inside `/developer`
+#### Flow C — First-cycle stage selection inside `/developer`
 
-When invoking `/developer` for the *first* cycle of a task that
-will touch any `.c` / `.cc` / installed header file, pass
-`stage=lock-in` so the developer skill knows to write baseline
-tests for every (symbol, scenario) pair in the planner's
-`### API surface` and commit them as their own work-unit
-commits BEFORE any refactor cycle:
+The developer's *first* cycle on a task is never `stage=refactor`.
+Pick one of two opening stages based on what the task is asking
+for. Both opening stages require `## Test scenarios` to already
+exist in LOG (Flow E) — they only differ in what the scenarios
+describe and what the developer does with them.
+
+| Task shape (from `## Refined prompt` + `## Execution plan`) | Opening stage | What developer does |
+|---|---|---|
+| Refactor of existing `.c`/`.cc`/installed header — behavior must not change | `stage=lock-in` | Write baseline tests that mirror every `[P]/[N]/[E]/[C]` row in `## Test scenarios` (sourced from the *current* code), commit them as their own work-unit commits, confirm GREEN against unmodified production code. |
+| New API / new feature — production code does not exist yet | `stage=tdd` | TDD red→green→refactor: write one failing test per `[P]/[N]/[E]/[C]` row in `## Test scenarios` (sourced from the design/spec), watch them fail for the right reason, then implement until each row's test goes green. |
+| Mixed (touches existing code AND adds new behavior) | `stage=lock-in` first, then `stage=tdd` | Lock-in for the existing-code surface lands first as its own commits; TDD for the new surface lands after. The scenario document must clearly partition rows by surface. |
 
 ```
 Skill(skill="developer", args="LOG=<path>; stage=lock-in")
+Skill(skill="developer", args="LOG=<path>; stage=tdd")
 ```
 
-After the lock-in cycle is green, subsequent `/developer`
-invocations on the same task implicitly run `stage=refactor`
-cycles. Refactor commits that break a baseline test = regression
-→ bounce to `/developer` (do **not** edit the baseline test).
+Neither opening stage may start without `## Test scenarios`. If
+it's missing, route to Flow E first — for `stage=tdd` this also
+means scenarios are derived from `## Design` / `### API surface`
+because there is no existing source to read.
 
-The developer's role skill enforces R-LOCK-IN-BASELINE; this
-skill's job is to make sure the lock-in cycle precedes any
-refactor cycle in `git log --oneline` order.
+After the opening stage is green, subsequent `/developer`
+invocations on the same task implicitly run `stage=refactor`
+cycles. Refactor commits that break a `[P]/[N]/[E]/[C]`-tagged
+test = regression → bounce to `/developer` (do **not** edit the
+test). For TDD tasks, "regression" is identical to "broke a test
+that was just made green" — same rule.
+
+The developer's role skill enforces R-LOCK-IN-BASELINE (and its
+TDD analogue: tests precede production code); this skill's job
+is to make sure the scenario inventory precedes any test-writing
+cycle, and that any opening stage precedes refactor cycles in
+`git log --oneline` order.
 
 #### Flow D — Scenario coverage check at developer→tester handoff
 
@@ -185,20 +218,115 @@ After `/developer` returns and before invoking `/tester`,
 verify R-API-SCENARIO-COVERAGE locally:
 
 ```
-1. Read § API surface from ## Execution plan.
+1. Read § API surface from ## Execution plan AND the
+   [P]/[N]/[E]/[C] rows from ## Test scenarios. The latter is
+   the authoritative scenario list — it expands § API surface
+   with every concrete errno / edge / corner row.
 2. Read the diff: git diff <prev-tip>..HEAD on test files
    touched in this task.
-3. For every (symbol, scenario) pair in § API surface, grep
-   the diff for an EXPECT_* / ASSERT_* that targets the
-   symbol AND exercises the scenario.
-4. If any pair is missing AND not marked `n/a — <reason>` in
-   § API surface → bounce to /developer with the missing
-   pairs listed in the bounce. Do not invoke /tester.
+3. For every scenario row in ## Test scenarios (and every
+   (symbol, scenario) pair in § API surface), grep the diff for
+   an EXPECT_* / ASSERT_* that targets the symbol AND exercises
+   that scenario. Use the row's ID ([P1], [N3], …) as the
+   traceability tag (e.g. in the test name or a brief comment)
+   so the mapping is unambiguous.
+4. If any row is missing AND not marked `n/a — <reason>` in
+   ## Test scenarios → bounce to /developer with the missing
+   IDs listed in the bounce. Do not invoke /tester.
 ```
 
 The supervisor's after-developer checkpoint also enforces this;
 this skill catches it earlier so you don't burn a tester run on
 incomplete coverage.
+
+#### Flow E — Scenario inventory before any test code
+
+Tests get written in `/developer`'s opening cycle (`stage=lock-in`
+for refactors, `stage=tdd` for new features). Before *either*
+cycle starts, `/test-scenario-generator` must produce a complete,
+traceable `## Test scenarios` section in LOG so the tests have a
+fixed contract to mirror — instead of the developer improvising
+scenarios on the fly.
+
+Trigger: the most recent supervisor verdict after `## Design`
+sets `next_stage: test-scenario-generator`, OR the loop is about
+to invoke `/developer` with `stage=lock-in` or `stage=tdd` and
+`## Test scenarios` is missing from LOG.
+
+**Pick the inventory mode** based on Flow C's task-shape table:
+
+| Source of scenarios | When to use | Notes |
+|---|---|---|
+| `mode=baseline` — read existing source | refactor task; `stage=lock-in` is next | Phase 2 enumerates branches, returns, callees off the *current* `.c`/`.cc`. Documents today's behavior. |
+| `mode=spec` — read `## Design` + `### API surface` | new-feature TDD task; `stage=tdd` is next | The skill walks Phase 2 against the *intended* contract: branches/returns/callees come from the design's API contract, not from source that doesn't exist yet. The output rows are the failing tests the developer must write first. |
+| both, partitioned | mixed task | Run the skill twice (or in one call with explicit partitioning). The appended `## Test scenarios` section must clearly mark which rows are baseline vs. TDD so the developer cycles consume them in the right order. |
+
+```
+1. Collect targets from ## Execution plan § API surface — every
+   (symbol, file:signature) the task will touch or introduce.
+   For TDD targets that don't exist yet, the planner records the
+   intended file path + signature; carry that forward.
+
+2. Invoke the skill, passing the chosen mode:
+
+       Skill(
+         skill="test-scenario-generator",
+         args="LOG=<path>; mode=<baseline|spec|mixed>; \
+               targets=<file::sig, file::sig, ...>"
+       )
+
+   The skill walks its four phases (map → analyze → generate →
+   emit) and appends a single ## Test scenarios section to LOG
+   containing, for every target:
+     - Context block (callers, callees, cluster)
+     - Branch enumeration table (Phase 2.1)
+     - Errno map (Phase 2.2) — every distinct return value
+     - External dependency catalogue (Phase 2.3)
+     - State catalogue (Phase 2.4)
+     - Scenario rows: [P]/[N]/[E]/[C] with stable IDs, each
+       tagged with its surface (baseline vs. tdd) when mode=mixed
+     - Coverage check (mandatory ✔/✖ block)
+     - Open questions (if any)
+
+   In `mode=spec`, Phase 2's "every branch" / "every return" is
+   read off the API contract: each documented errno becomes a
+   row, each precondition becomes a guard branch, each callee
+   listed in the design becomes a dependency. If the design is
+   too thin to support this, that is a real signal — surface it
+   under "Open questions" rather than guessing.
+
+3. Validate the appended section before handing back to the
+   supervisor:
+     - Coverage check block exists and every line is ✔ (any ✖
+       means the inventory is incomplete — bounce back to
+       /test-scenario-generator with the failing line).
+     - Every symbol in § API surface appears in at least one
+       scenario row.
+     - For mode=spec: every documented errno / precondition /
+       postcondition in the design has a corresponding row.
+     - Open questions, if any, are surfaced to the user as a
+       user-input gate (Stop conditions). Do not paper over
+       open questions by guessing — the resulting tests would
+       inherit the guess and either over-specify (locking in
+       wrong behavior) or under-specify (silent gap).
+
+4. Route to /supervisor for the post-scenario-generator
+   checkpoint. The supervisor's verdict will set
+   next_stage: developer with the matching opening stage:
+     - mode=baseline → stage=lock-in
+     - mode=spec     → stage=tdd
+     - mode=mixed    → stage=lock-in first, then stage=tdd
+```
+
+This skill stops at Phase 4 — it does not write test code.
+That is the developer role's job in the opening cycle, where
+each `[P]/[N]/[E]/[C]` row becomes one `TEST_F` (or equivalent)
+whose name carries the row ID for traceability. For `stage=tdd`,
+the tests are written *first* and must initially fail for the
+documented reason (compile error, link error, or assertion
+failure on a stub) — that's the TDD red phase, and the row's
+predicate is what tells the developer the test is failing for
+the right reason.
 
 ### Step 4 — Loop
 
@@ -277,6 +405,7 @@ interrupted and resumed across sessions.
 | `/refiner` | refining | `## Refined prompt` |
 | `/planner` | planning (incl. `### API surface`) | `## Execution plan` |
 | `/architect` | OOAD design | `## Design` (or waiver) |
+| `/test-scenario-generator` | scenario inventory before any test code (Flow E) | `## Test scenarios` |
 | `/developer` | TDD impl, lock-in cycle FIRST | `## Developer log` |
 | `/tester` | independent GBS verification | `## Tester report` |
 | `/reviewer` | diff review, scenario coverage audit | `## Review report` |
@@ -315,9 +444,18 @@ Step 2:  Skill(supervisor) → "PASS, next_stage: planner"
 Step 2:  Skill(planner) → appends ## Execution plan with § API surface
 Step 2:  Skill(supervisor) → "PASS, next_stage: architect"
 Step 2:  Skill(architect) → appends ## Design
+Step 2:  Skill(supervisor) → "PASS, next_stage: test-scenario-generator"
+Flow E:  no ## Test scenarios yet → run scenario inventory.
+         Task touches existing notification_db.c → mode=baseline.
+Step 2:  Skill(test-scenario-generator,
+                "mode=baseline; targets=<from § API surface>")
+         → appends ## Test scenarios with [P]/[N]/[E]/[C] rows,
+           errno map, coverage check ✔
 Step 2:  Skill(supervisor) → "PASS, next_stage: developer"
-Flow C:  first developer call on this task → stage=lock-in
-Step 2:  Skill(developer, "stage=lock-in") → lock-in cycle, baseline GREEN
+Flow C:  refactor task → opening stage = lock-in
+         (## Test scenarios present — lock-in cycle is unblocked)
+Step 2:  Skill(developer, "stage=lock-in") → tests mirror every
+         [P]/[N]/[E]/[C] row, baseline GREEN
 Flow D:  scenario coverage check passes
 Step 2:  Skill(developer, "stage=refactor") → refactor cycle GREEN
 Step 2:  Skill(tester) → ## Tester report PASS
@@ -331,6 +469,44 @@ STOP:    Task complete. Next task in STATE.md is 03-db-tests.
 The whole loop above is one `/tizen-refactoring` invocation. The
 user types one slash command; the orchestrator drives until the
 task is done or hits a stop condition.
+
+### Example — TDD task adding a new API
+
+```
+User:    /tizen-refactoring
+Step 0:  STATE.md → active task = 04-add-bulk-insert
+         LOG = refactoring-plans/05_logs/04-add-bulk-insert.md (empty)
+Step 1:  LOG empty → /supervisor entry checkpoint → next_stage: refiner
+Step 2:  Skill(refiner) → ## Refined prompt: "add notification_db_bulk_insert()"
+Step 2:  Skill(supervisor) → "PASS, next_stage: planner"
+Step 2:  Skill(planner) → ## Execution plan with § API surface listing
+         the new symbol, file:signature, and intended errno set
+Step 2:  Skill(supervisor) → "PASS, next_stage: architect"
+Step 2:  Skill(architect) → ## Design: contract, preconditions,
+         documented errno enum, callee list
+Step 2:  Skill(supervisor) → "PASS, next_stage: test-scenario-generator"
+Flow E:  symbol does not exist yet → mode=spec.
+Step 2:  Skill(test-scenario-generator,
+                "mode=spec; targets=notification_db.c::notification_db_bulk_insert")
+         → ## Test scenarios derived from ## Design: one [N] per
+           documented errno, [E] for boundary list sizes, [C] for
+           ordering / partial failure, coverage check ✔
+Step 2:  Skill(supervisor) → "PASS, next_stage: developer"
+Flow C:  new feature → opening stage = tdd
+Step 2:  Skill(developer, "stage=tdd")
+         RED:    one failing test per [P]/[N]/[E]/[C] row,
+                 each failing for the documented reason
+                 (link error / stub assertion).
+         GREEN:  implements notification_db_bulk_insert() until
+                 every row's test goes green.
+         REFACTOR cycles thereafter.
+Flow D:  scenario coverage check passes (every row has a tagged test)
+Step 2:  Skill(tester) → ## Tester report PASS
+Step 2:  Skill(reviewer) → APPROVE
+Step 2:  Skill(committer) → ## Commits
+Step 2:  Skill(supervisor) → exit checkpoint PASS
+STOP:    Task complete.
+```
 
 ---
 
@@ -350,6 +526,22 @@ task is done or hits a stop condition.
   tester with missing scenario coverage means the tester runs
   on an incomplete contract — the supervisor will bounce, but
   earlier is cheaper.
+- **Forgetting Flow E.** Letting the developer's opening cycle
+  (`stage=lock-in` *or* `stage=tdd`) start without a
+  `## Test scenarios` section forces the developer to invent
+  scenarios on the fly — exactly the "invisible scenarios"
+  failure mode the inventory exists to prevent. Errno paths and
+  corner cases get silently dropped: in lock-in this means a
+  refactor goes undefended; in TDD this means red tests don't
+  exist for paths that should fail, and the new API ships with
+  unspecified behavior.
+- **Picking the wrong inventory mode.** Running
+  `/test-scenario-generator` in `mode=baseline` against a symbol
+  that doesn't exist yet produces an empty inventory; running
+  it in `mode=spec` against a symbol that already has source
+  ignores the actual code and locks in whatever the design *says*
+  rather than what the code *does*. Match the mode to Flow C's
+  task-shape table.
 - **Treating supervisor as optional.** Skipping the supervisor
   checkpoint between two stages because "the prior stage's
   output looked fine" is how silent rewinds happen.
