@@ -9,7 +9,7 @@ You stage and commit. Two commit *kinds* exist:
 
 | Kind | When | Subject | Body shape |
 |---|---|---|---|
-| **Work-unit commit** | Inside a task — every TDD step that goes green; every reviewer-approved diff. One scope per commit. | Short imperative title; lowercase scope; ≤ 70 chars. | Concise body explaining **what** changed and **why**. Wrap at 72 chars. |
+| **Work-unit commit** | Inside a task — every TDD step that goes green; every reviewer-approved diff. One scope per commit. | Short imperative title starting with a **capitalized verb** (e.g. `Add notification's internal test`); ≤ 70 chars; no `type(scope):` prefix; no trailing period. | Concise body explaining **what** changed and **why**. Wrap at 72 chars. |
 | **Release commit** | At the end of a release window — AFTER every task's work-unit commits in that window have already landed. ONE per window. Touches **only** `packaging/<package>.spec` `Version:` line. | `Release version X.Y.Z` (no scope, no period). | `Changes:` listing every work-unit-commit *title* that landed since the previous Release, in chronological order (oldest first). |
 
 Both kinds carry `Change-Id` and `Signed-off-by` trailers (Gerrit /
@@ -31,8 +31,8 @@ review.tizen.org convention).
 Append a `## Commits` section to the active log file:
 
 ```
-- <sha>  test(<scope>): add failing tests for X
-- <sha>  refactor(<scope>): adopt SqliteStmt RAII guard
+- <sha>  Add failing tests for X
+- <sha>  Adopt SqliteStmt RAII guard in <scope>
 ```
 
 If this commit closes a release window, also append / update
@@ -44,7 +44,7 @@ If this commit closes a release window, also append / update
 ## Work-unit commit format
 
 ```
-<type>(<scope>): <verb> <object>
+<Capitalized verb> <rest of the subject>
 
 <one to three short paragraphs explaining what changed and why>
 
@@ -53,17 +53,17 @@ Signed-off-by: <Author Name> <author@email>
 ```
 
 Rules:
-- `<type>` ∈ `test | refactor | feat | fix | perf | build | style | chore | doc`.
-- `<scope>` is the lowercase name of one component of the package
-  source tree — typically a single directory or file under `src/`
-  (e.g. one module, one subsystem, one public-API surface). For
-  cross-cutting commits that don't belong to a single source
-  module, use one of the dedicated meta-scopes: `smoke`,
-  `integration`, `internal-api`, `release`, `gcov`, `asan`.
-  Whichever you pick, it must already appear in the package's
-  scope ledger (see the active refactor's planning notes) — do
-  not invent new scope tokens ad-hoc.
-- Subject ≤ 70 chars, imperative mood, no trailing period.
+- **Subject must start with a capital letter and lead with a verb**
+  in the imperative mood (e.g. `Add`, `Modify`, `Remove`, `Fix`,
+  `Cover`, `Adopt`, `Introduce`, `Refactor`). Matches upstream
+  Tizen style — see `a553836` (`Modify the major warning of svace`).
+- **No `type(scope):` Conventional-Commits prefix.** The scope, if
+  worth naming, belongs *inside* the sentence
+  (e.g. `Add notification's internal test`,
+  `Adopt SqliteStmt RAII guard in pkgmgr-info`). Even though there
+  is no prefix, the **one-scope-per-commit** rule (R-COMMIT-SCOPE)
+  still holds — split mixed-scope work into separate commits.
+- Subject ≤ 70 chars, no trailing period.
 - Body wrapped at 72 cols; explains *why* more than *what*.
 - `Change-Id` is a SHA1-style 40-hex string prefixed with `I`. The
   Gerrit `commit-msg` hook generates it automatically; if the hook
@@ -75,16 +75,37 @@ Rules:
   <hyeonuk.kim@samsung.com>`); do NOT add Anthropic / Claude /
   AI-tool trailers — upstream Tizen review will reject them.
 
-### Example
+### Examples
+
+Good subjects (capitalized, verb-first, scope inside the sentence):
 
 ```
-test(<scope>): cover <module>_to_string mappings
+Add notification's internal test
+Cover notification_status_to_string mappings
+Adopt SqliteStmt RAII guard in pkgmgr-info
+Modify the major warning of svace
+Remove dead pkgmgr_info_internal helpers
+```
 
-Add the first test fixture for <module>.c. Asserts every
-<module>_e enum value documented in <module>.h round-trips
-through the converter and the documented fallback for unknown
-integers is observed. Locks behavior in before any production-side
-touch lands.
+Bad subjects (rejected — bounce back and rewrite):
+
+```
+test(notification): add internal test          ← no type(scope): prefix
+add notification's internal test               ← must capitalize first letter
+notification: add internal test                ← must lead with a verb
+Added notification's internal test.            ← imperative, no period
+```
+
+Full example:
+
+```
+Cover notification_status_to_string mappings
+
+Add the first test fixture for notification_status.c. Asserts every
+notification_status_e enum value documented in notification.h
+round-trips through the converter and the documented fallback for
+unknown integers is observed. Locks behavior in before any
+production-side touch lands.
 
 Change-Id: I9b3a4f1e2c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f
 Signed-off-by: KimHyeonuk <hyeonuk.kim@samsung.com>
@@ -236,7 +257,9 @@ the message body, just before `Signed-off-by`.
 ## Rules
 
 - **R-COMMIT-FORMAT** — every commit (work-unit and Release)
-  carries `Change-Id` and `Signed-off-by`.
+  carries `Change-Id` and `Signed-off-by`. Work-unit subjects start
+  with a capitalized verb and carry no `type(scope):` prefix;
+  Release subjects are exactly `Release version X.Y.Z`.
 - **R-COMMIT-SCOPE** — one scope per work-unit commit. Multi-scope
   bounces back to developer for splitting.
 - **R-COMMIT-RELEASE** — Release commit body lists every work-unit
@@ -263,6 +286,10 @@ the message body, just before `Signed-off-by`.
 
 - Staging files the reviewer didn't review.
 - Mixed-scope commits.
+- Lower-case or non-verb-leading work-unit subjects
+  (e.g. `add internal test`, `notification: add internal test`,
+  `test(notification): …`). Rewrite as `Add notification's
+  internal test`.
 - Release commit missing the `Changes:` body.
 - Forgetting `Change-Id` (Gerrit will reject on push).
 - Forgetting `Signed-off-by` (Gerrit will reject; project policy).
