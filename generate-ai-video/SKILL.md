@@ -1,30 +1,27 @@
 ---
 name: generate-ai-video
-description: Generates an MP4 video by combining a Gemini-generated image (gemini-3.1-flash-image-preview) and Gemini-generated music (Lyria 3: lyria-3-pro-preview for --length full, lyria-3-clip-preview for --length clip) from a single text prompt. Merges via ffmpeg (-loop 1 static image over audio). Reads providers.gemini.api_key from /home/owner/.carbon/config.yaml. Requires ffmpeg. Pure shell + curl, no Python/Node required. Trigger when user asks to create, make, generate, or render a video, short film, animated clip, visual+audio combination, or slideshow with music. Always report image path, audio path, and final video path.
-argument-hint: "[--length clip|full] [--size WxH] [--output PATH]"
+description: Generates an MP4 video from a text prompt using Google Veo via the Gemini API (predictLongRunning + polling). Default model veo-3.0-generate-preview produces video with audio; veo-2.0-generate-001 produces video only. Reads providers.gemini.api_key from /home/owner/.carbon/config.yaml. Pure shell + curl, no Python/Node or ffmpeg required. Trigger when user asks to create, make, generate, or render a video, short film, animated clip, or any AI-generated video content. Always report the final video path and the model used.
+argument-hint: "[--model veo-3|veo-2] [--aspect 16:9|9:16|1:1] [--duration SECS] [--output PATH]"
 user-invocable: true
 allowed-tools: true
 ---
 
 # generate-ai-video
 
-Generates an MP4 video from a text prompt by:
-1. Creating an image via Gemini (`gemini-3.1-flash-image-preview`)
-2. Composing background music via Gemini Lyria 3
-3. Merging both into an MP4 with `ffmpeg` (static image over audio track)
+Generates an MP4 video from a text prompt by calling the **Google Veo API** via `predictLongRunning`, polling until the operation completes, then saving the result.
 
-**Prerequisite:** `providers.gemini.api_key` must be set in `/home/owner/.carbon/config.yaml`, and `ffmpeg` must be installed.
+**Prerequisite:** `providers.gemini.api_key` must be set in `/home/owner/.carbon/config.yaml`.
 
 ## Intent-Based Workflow
 
 | User says | Script | Example |
 |---|---|---|
-| "Make a video of a rainy city at night" | `generate.sh` | `bash generate.sh "rainy city at night"` |
-| "Create a short video with a forest scene and relaxing music" | `generate.sh --length clip` | `bash generate.sh "forest" --length clip` |
-| "Generate a full-length video for my product promo" | `generate.sh --length full` | `bash generate.sh "product promo" --length full` |
-| "Save video to /tmp/promo.mp4" | `generate.sh --output` | `bash generate.sh "prompt" --output /tmp/promo.mp4` |
+| "Generate a video of waves crashing on shore" | `generate.sh` | `bash generate.sh "waves crashing on shore"` |
+| "Make a short vertical clip for a reel" | `generate.sh --aspect` | `bash generate.sh "prompt" --aspect 9:16` |
+| "Create a video without audio" | `generate.sh --model` | `bash generate.sh "prompt" --model veo-2` |
+| "Save to /tmp/clip.mp4" | `generate.sh --output` | `bash generate.sh "prompt" --output /tmp/clip.mp4` |
 
-**Always tell the user all three output paths** — image, audio, and final video.
+**Always tell the user the final video path and which model was used.**
 
 ## CLI Usage
 
@@ -36,44 +33,48 @@ bash <skill-dir>/scripts/generate.sh "<prompt>" [OPTIONS]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--length clip\|full` | `clip` | Music length: `clip` → ~30s (lyria-3-clip-preview), `full` → multi-minute (lyria-3-pro-preview) |
-| `--size WxH` | `1024x1024` | Image dimensions (converted to Gemini aspect ratio) |
-| `--output PATH` | `./video_<timestamp>.mp4` | Final video output path |
-| `--image-output PATH` | `./image_<timestamp>.png` | Intermediate image path |
-| `--audio-output PATH` | `./audio_<timestamp>.mp3` | Intermediate audio path |
+| `--model veo-3\|veo-2` | `veo-3` | Model: `veo-3` = video+audio (veo-3.0-generate-preview), `veo-2` = video only (veo-2.0-generate-001) |
+| `--aspect RATIO` | `16:9` | Aspect ratio: `16:9`, `9:16`, `1:1`, `4:3`, `3:4` |
+| `--duration SECS` | `8` | Video length in seconds (model-dependent; Veo 2: 5 or 8) |
+| `--output PATH` | `./video_<timestamp>.mp4` | Output file path |
 | `-h`, `--help` | | Show usage |
 
 ### Pinned Models
 
-| Step | Model |
-|---|---|
-| Image | `gemini-3.1-flash-image-preview` |
-| Music (`--length clip`) | `lyria-3-clip-preview` (~30s) |
-| Music (`--length full`) | `lyria-3-pro-preview` (multi-minute) |
+| `--model` | Model ID | Audio |
+|---|---|---|
+| `veo-3` (default) | `veo-3.0-generate-preview` | Yes (native) |
+| `veo-2` | `veo-2.0-generate-001` | No |
+
+### API Flow
+
+1. `POST .../models/<model>:predictLongRunning` → returns `{"name": "operations/..."}`
+2. `GET .../operations/<id>` every 10s until `"done": true` (max 10 min)
+3. Extract video — inline base64 `"data"` field or download from `"uri"`
+4. Save to output path
 
 ## Output
 
 ### Success
 
-Prints intermediate paths to stderr and the final video path to stdout:
-
 ```
-Generating image…
-Image: ./image_20260512_193000.jpg
-Generating music…
-Audio: ./audio_20260512_193000.mp3
-Combining into video…
-./video_20260512_193000.mp4
+Starting video generation (model=veo-3.0-generate-preview)…
+Operation started: operations/abc123
+Polling (1/60)…
+Polling (2/60)…
+...
+Video saved to: ./video_20260512_194900.mp4 (model=veo-3.0-generate-preview)
+./video_20260512_194900.mp4
 ```
 
 ### Error
 
 | Error | Description | Recovery |
 |-------|-------------|----------|
-| `ffmpeg is required but not found` | ffmpeg not in PATH | `apt-get install ffmpeg` or `brew install ffmpeg` |
 | `providers.gemini.api_key not found` | API key missing | Add `providers.gemini.api_key` to config |
-| `Lyria refused` | Copyright filter triggered | Rephrase prompt — describe mood/instruments/tempo |
-| `ffmpeg failed` | ffmpeg codec/format error | Check image and audio files exist and are valid |
+| `HTTP 403` | Key lacks Veo access | Enable Veo API or use a key with Veo access |
+| `timed out waiting` | Generation exceeded 10 min | Retry or simplify the prompt |
+| `could not extract video` | Unexpected response format | Check raw response in stderr |
 
 ## Config Schema
 
@@ -92,15 +93,13 @@ providers:
 
 | Case | Handling |
 |------|----------|
-| Gemini returns JPEG instead of PNG | Extension auto-corrected; actual path printed |
-| Lyria copyright filter | Surface finishReason; suggest rephrasing |
-| Image has odd dimensions | ffmpeg `yuv420p` requires even dimensions — padded automatically |
-| `--length full` produces multi-minute audio | Video length matches audio via `-shortest` |
+| Response has inline base64 `"data"` | Decoded directly to output file |
+| Response has `"uri"` instead of `"data"` | Downloaded via curl with API key header |
+| `--duration` not supported by model | API returns 400; remove `--duration` and retry |
+| Veo 3 only available in preview regions | HTTP 403 or 404; switch to `--model veo-2` |
 
 ## Files
 
-- `scripts/generate.sh` — orchestrator (image → audio → video)
-- `scripts/gemini_image.sh` — Gemini image generation
-- `scripts/gemini_music.sh` — Lyria 3 music generation
-- `scripts/combine.sh` — ffmpeg image+audio → MP4
-- `scripts/parse_yaml.sh` — YAML helpers
+- `scripts/generate.sh` — orchestrator (arg parsing + dispatch)
+- `scripts/gemini_veo.sh` — Veo API: start operation, poll, save video
+- `scripts/parse_yaml.sh` — YAML helpers (reads config.yaml)
