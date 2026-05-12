@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # generate.sh — entry point for generate-ai-video skill.
-# Calls the Google Veo API via Gemini predictLongRunning to generate an MP4.
+# Calls the Google Veo 3.1 API via Gemini predictLongRunning to generate an MP4.
+#
+# Model is pinned to veo-3.1-generate-preview (audio is generated natively).
 #
 # Usage:
-#   generate.sh "<prompt>" [--model veo-3|veo-2] [--aspect RATIO]
-#               [--duration SECS] [--output PATH] [--image PATH]
+#   generate.sh "<prompt>" [--aspect 16:9|9:16]
+#               [--resolution 720p|1080p|4k]
+#               [--duration 4|6|8]
+#               [--output PATH] [--image PATH]
 #
 # --image PATH turns this into an image-to-video request: the file is
 # base64-encoded and sent as the seed/reference frame. When --image is
@@ -22,21 +26,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/parse_yaml.sh"
 
 PROMPT=""
-MODEL="veo-3"
 ASPECT="16:9"
+RESOLUTION="720p"
 DURATION="8"
 OUTPUT=""
 IMAGE=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --model)    MODEL="${2:-}";    shift 2 ;;
-        --aspect)   ASPECT="${2:-}";   shift 2 ;;
-        --duration) DURATION="${2:-}"; shift 2 ;;
-        --output)   OUTPUT="${2:-}";   shift 2 ;;
-        --image)    IMAGE="${2:-}";    shift 2 ;;
+        --aspect)     ASPECT="${2:-}";     shift 2 ;;
+        --resolution) RESOLUTION="${2:-}"; shift 2 ;;
+        --duration)   DURATION="${2:-}";   shift 2 ;;
+        --output)     OUTPUT="${2:-}";     shift 2 ;;
+        --image)      IMAGE="${2:-}";      shift 2 ;;
         --help|-h)
-            sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         --) shift; PROMPT="${1:-$PROMPT}"; shift || true ;;
@@ -47,7 +51,7 @@ done
 
 if [ -z "$PROMPT" ]; then
     echo "generate.sh: prompt is required" >&2
-    echo "Usage: generate.sh \"<prompt>\" [--model veo-3|veo-2] [--aspect RATIO] [--duration SECS] [--output PATH] [--image PATH]" >&2
+    echo "Usage: generate.sh \"<prompt>\" [--aspect 16:9|9:16] [--resolution 720p|1080p|4k] [--duration 4|6|8] [--output PATH] [--image PATH]" >&2
     exit 1
 fi
 
@@ -67,10 +71,10 @@ if [ -z "$OUTPUT" ]; then
 fi
 
 exec bash "$SCRIPT_DIR/gemini_veo.sh" \
-    --config   "$CONFIG_FILE" \
-    --model    "$MODEL" \
-    --aspect   "$ASPECT" \
-    --duration "$DURATION" \
-    --output   "$OUTPUT" \
+    --config     "$CONFIG_FILE" \
+    --aspect     "$ASPECT" \
+    --resolution "$RESOLUTION" \
+    --duration   "$DURATION" \
+    --output     "$OUTPUT" \
     ${IMAGE:+--image "$IMAGE"} \
     -- "$PROMPT"

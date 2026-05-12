@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# gemini_veo.sh — Google Veo video generation via Gemini predictLongRunning API.
+# gemini_veo.sh — Google Veo 3.1 video generation via Gemini predictLongRunning API.
 # Called by generate.sh; not meant to be invoked directly.
 #
-# Pinned models (do not parameterize the endpoints):
-#   --model veo-3  → veo-3.0-generate-preview  (video + audio)
-#   --model veo-2  → veo-2.0-generate-001       (video only)
+# Model is pinned to veo-3.1-generate-preview (audio is generated natively).
+# Per the Gemini API reference for Veo 3.1:
+#   - aspectRatio: "16:9" or "9:16"
+#   - resolution:  "720p" (default), "1080p", or "4k"
+#   - durationSeconds (string): "4", "6", or "8"
+#     ("8" is required for 1080p/4k and when reference/seed images are used)
 #
 # Flow:
 #   1. POST :predictLongRunning  → {"name": "operations/..."}
@@ -18,15 +21,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=parse_yaml.sh
 . "$SCRIPT_DIR/parse_yaml.sh"
 
-VEO3_MODEL="veo-3.0-generate-preview"
-VEO3_ENDPOINT="https://generativelanguage.googleapis.com/v1beta/models/veo-3.0-generate-preview:predictLongRunning"
-VEO2_MODEL="veo-2.0-generate-001"
-VEO2_ENDPOINT="https://generativelanguage.googleapis.com/v1beta/models/veo-2.0-generate-001:predictLongRunning"
+MODEL="veo-3.1-generate-preview"
+ENDPOINT="https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:predictLongRunning"
 OPERATIONS_BASE="https://generativelanguage.googleapis.com/v1beta"
 
 CONFIG_FILE=""
-MODEL_CHOICE="veo-3"
 ASPECT="16:9"
+RESOLUTION="720p"
 DURATION="8"
 OUTPUT=""
 IMAGE=""
@@ -34,25 +35,16 @@ PROMPT=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --config)   CONFIG_FILE="$2";   shift 2 ;;
-        --model)    MODEL_CHOICE="$2";  shift 2 ;;
-        --aspect)   ASPECT="$2";        shift 2 ;;
-        --duration) DURATION="$2";      shift 2 ;;
-        --output)   OUTPUT="$2";        shift 2 ;;
-        --image)    IMAGE="$2";         shift 2 ;;
+        --config)     CONFIG_FILE="$2";   shift 2 ;;
+        --aspect)     ASPECT="$2";        shift 2 ;;
+        --resolution) RESOLUTION="$2";    shift 2 ;;
+        --duration)   DURATION="$2";      shift 2 ;;
+        --output)     OUTPUT="$2";        shift 2 ;;
+        --image)      IMAGE="$2";         shift 2 ;;
         --) shift; PROMPT="$*"; break ;;
         *)  echo "gemini_veo.sh: unexpected arg: $1" >&2; exit 1 ;;
     esac
 done
-
-case "$MODEL_CHOICE" in
-    veo-3|veo3|3) MODEL="$VEO3_MODEL"; ENDPOINT="$VEO3_ENDPOINT" ;;
-    veo-2|veo2|2) MODEL="$VEO2_MODEL"; ENDPOINT="$VEO2_ENDPOINT" ;;
-    *)
-        echo "gemini_veo.sh: --model must be 'veo-3' or 'veo-2'; got '$MODEL_CHOICE'" >&2
-        exit 1
-        ;;
-esac
 
 API_KEY="$(get_yaml_nested3 providers gemini api_key "$CONFIG_FILE")"
 if [ -z "$API_KEY" ]; then
@@ -113,8 +105,9 @@ EOF
   }],
   "parameters": {
     "aspectRatio": "$ASPECT",
+    "resolution": "$RESOLUTION",
     "sampleCount": 1,
-    "durationSeconds": $DURATION
+    "durationSeconds": "$DURATION"
   }
 }
 EOF
@@ -125,8 +118,9 @@ else
   "instances": [{"prompt": "$ESCAPED_PROMPT"}],
   "parameters": {
     "aspectRatio": "$ASPECT",
+    "resolution": "$RESOLUTION",
     "sampleCount": 1,
-    "durationSeconds": $DURATION
+    "durationSeconds": "$DURATION"
   }
 }
 EOF
