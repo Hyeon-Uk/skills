@@ -4,7 +4,11 @@
 #
 # Usage:
 #   generate.sh "<prompt>" [--model veo-3|veo-2] [--aspect RATIO]
-#               [--duration SECS] [--output PATH]
+#               [--duration SECS] [--output PATH] [--image PATH]
+#
+# --image PATH turns this into an image-to-video request: the file is
+# base64-encoded and sent as the seed/reference frame. When --image is
+# set, Veo currently requires --duration 8 (default).
 #
 # Exit codes:
 #   0  success — final line of stdout is the absolute output path
@@ -22,6 +26,7 @@ MODEL="veo-3"
 ASPECT="16:9"
 DURATION="8"
 OUTPUT=""
+IMAGE=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -29,8 +34,9 @@ while [ $# -gt 0 ]; do
         --aspect)   ASPECT="${2:-}";   shift 2 ;;
         --duration) DURATION="${2:-}"; shift 2 ;;
         --output)   OUTPUT="${2:-}";   shift 2 ;;
+        --image)    IMAGE="${2:-}";    shift 2 ;;
         --help|-h)
-            sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         --) shift; PROMPT="${1:-$PROMPT}"; shift || true ;;
@@ -41,13 +47,18 @@ done
 
 if [ -z "$PROMPT" ]; then
     echo "generate.sh: prompt is required" >&2
-    echo "Usage: generate.sh \"<prompt>\" [--model veo-3|veo-2] [--aspect RATIO] [--duration SECS] [--output PATH]" >&2
+    echo "Usage: generate.sh \"<prompt>\" [--model veo-3|veo-2] [--aspect RATIO] [--duration SECS] [--output PATH] [--image PATH]" >&2
     exit 1
 fi
 
 if [ ! -r "$CONFIG_FILE" ]; then
     echo "generate.sh: cannot read config at $CONFIG_FILE" >&2
     echo "Set CARBON_CONFIG to override the path, or create the file." >&2
+    exit 1
+fi
+
+if [ -n "$IMAGE" ] && [ ! -r "$IMAGE" ]; then
+    echo "generate.sh: cannot read image at $IMAGE" >&2
     exit 1
 fi
 
@@ -61,4 +72,5 @@ exec bash "$SCRIPT_DIR/gemini_veo.sh" \
     --aspect   "$ASPECT" \
     --duration "$DURATION" \
     --output   "$OUTPUT" \
+    ${IMAGE:+--image "$IMAGE"} \
     -- "$PROMPT"

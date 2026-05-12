@@ -16,8 +16,9 @@ bash generate.sh "<prompt>" [OPTIONS]
 |--------|---------|-------------|
 | `--model veo-3\|veo-2` | `veo-3` | Veo model selection |
 | `--aspect RATIO` | `16:9` | Aspect ratio |
-| `--duration SECS` | `8` | Duration in seconds |
+| `--duration SECS` | `8` | Duration in seconds (must be `8` when `--image` is set) |
 | `--output PATH` | `./video_<timestamp>.mp4` | Output file path |
+| `--image PATH` | (none) | Seed image (PNG/JPEG/WebP) — base64-encoded and sent as `instances[0].image.inlineData` to drive image-to-video |
 | `-h`, `--help` | | Show usage |
 
 ## Exit Codes

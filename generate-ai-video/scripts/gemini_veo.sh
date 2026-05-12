@@ -29,6 +29,7 @@ MODEL_CHOICE="veo-3"
 ASPECT="16:9"
 DURATION="8"
 OUTPUT=""
+IMAGE=""
 PROMPT=""
 
 while [ $# -gt 0 ]; do
@@ -38,6 +39,7 @@ while [ $# -gt 0 ]; do
         --aspect)   ASPECT="$2";        shift 2 ;;
         --duration) DURATION="$2";      shift 2 ;;
         --output)   OUTPUT="$2";        shift 2 ;;
+        --image)    IMAGE="$2";         shift 2 ;;
         --) shift; PROMPT="$*"; break ;;
         *)  echo "gemini_veo.sh: unexpected arg: $1" >&2; exit 1 ;;
     esac
@@ -65,7 +67,60 @@ REQUEST_FILE="$(mktemp)"
 RESPONSE_FILE="$(mktemp)"
 trap 'rm -f "$REQUEST_FILE" "$RESPONSE_FILE"' EXIT
 
-cat > "$REQUEST_FILE" <<EOF
+# Detect MIME type for the image (if any). Try `file` first, then fall
+# back to the file extension — embedded targets sometimes lack `file`.
+detect_mime() {
+    local path="$1" mime=""
+    if command -v file >/dev/null 2>&1; then
+        mime="$(file --mime-type -b "$path" 2>/dev/null || true)"
+    fi
+    case "$mime" in
+        image/*) printf '%s' "$mime"; return 0 ;;
+    esac
+    case "$path" in
+        *.png|*.PNG)                 printf 'image/png' ;;
+        *.jpg|*.JPG|*.jpeg|*.JPEG)   printf 'image/jpeg' ;;
+        *.webp|*.WEBP)               printf 'image/webp' ;;
+        *) return 1 ;;
+    esac
+}
+
+if [ -n "$IMAGE" ]; then
+    if ! IMAGE_MIME="$(detect_mime "$IMAGE")"; then
+        echo "gemini_veo.sh: could not determine image MIME type for $IMAGE (expected .png/.jpg/.jpeg/.webp)" >&2
+        exit 1
+    fi
+
+    # Stream the base64 directly into the request file so very large
+    # images don't have to live in a shell variable. `base64` wraps
+    # output by default on some platforms — strip whitespace so the
+    # JSON string stays on one line.
+    {
+        cat <<EOF
+{
+  "instances": [{
+    "prompt": "$ESCAPED_PROMPT",
+    "image": {
+      "inlineData": {
+        "mimeType": "$IMAGE_MIME",
+EOF
+        printf '        "data": "'
+        base64 < "$IMAGE" | tr -d '\n\r '
+        printf '"\n'
+        cat <<EOF
+      }
+    }
+  }],
+  "parameters": {
+    "aspectRatio": "$ASPECT",
+    "sampleCount": 1,
+    "durationSeconds": $DURATION
+  }
+}
+EOF
+    } > "$REQUEST_FILE"
+else
+    cat > "$REQUEST_FILE" <<EOF
 {
   "instances": [{"prompt": "$ESCAPED_PROMPT"}],
   "parameters": {
@@ -75,8 +130,13 @@ cat > "$REQUEST_FILE" <<EOF
   }
 }
 EOF
+fi
 
-echo "Starting video generation (model=$MODEL)…" >&2
+if [ -n "$IMAGE" ]; then
+    echo "Starting video generation (model=$MODEL, image=$IMAGE)…" >&2
+else
+    echo "Starting video generation (model=$MODEL)…" >&2
+fi
 
 HTTP_CODE="$(curl -sS -w '%{http_code}' -o "$RESPONSE_FILE" \
     -X POST "$ENDPOINT" \
