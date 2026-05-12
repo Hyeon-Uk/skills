@@ -1,7 +1,7 @@
 ---
 name: generate-ai-video
-description: Generates an MP4 video (with native audio — dialogue, SFX, ambience) from a text prompt and optionally a seed image, using Google Veo 3.1 (veo-3.1-generate-preview) via the Gemini API (predictLongRunning + polling). Supports image-to-video via --image PATH (PNG/JPEG/WebP), which Veo uses as the starting frame. Reads providers.gemini.api_key from /home/owner/.carbon/config.yaml. Pure shell + curl — no Python, Node, or ffmpeg required. Trigger when the user asks to create, make, generate, or render a video, short film, animated clip, image-to-video, animate-this-photo, talking-character clip, or any AI-generated video content. Always report the final video path.
-argument-hint: "[--aspect 16:9|9:16] [--resolution 720p|1080p|4k] [--duration 4|6|8] [--output PATH] [--image PATH]"
+description: Generates an MP4 video (with native audio — dialogue, SFX, ambience) from a text prompt and optionally a seed image, using Google Veo 3.1 (veo-3.1-generate-preview) via the Gemini API (predictLongRunning + polling). Supports image-to-video via --image PATH (PNG/JPEG/WebP), which Veo uses as a reference asset frame. Reads providers.gemini.api_key from /home/owner/.carbon/config.yaml. Pure shell + curl — no Python, Node, or ffmpeg required. Trigger when the user asks to create, make, generate, or render a video, short film, animated clip, image-to-video, animate-this-photo, talking-character clip, or any AI-generated video content. Always report the final video path.
+argument-hint: "[--aspect 16:9|9:16] [--resolution 720p|1080p|4k] [--output PATH] [--image PATH]"
 user-invocable: true
 allowed-tools: true
 ---
@@ -19,7 +19,6 @@ Generates an MP4 video (with native audio) from a text prompt by calling the **G
 | "Generate a video of waves crashing on shore" | `generate.sh` | `bash generate.sh "waves crashing on shore"` |
 | "Make a short vertical clip for a reel" | `generate.sh --aspect` | `bash generate.sh "prompt" --aspect 9:16` |
 | "I want it in 1080p" | `generate.sh --resolution` | `bash generate.sh "prompt" --resolution 1080p` |
-| "Just 4 seconds is fine" | `generate.sh --duration` | `bash generate.sh "prompt" --duration 4` |
 | "Save to /tmp/clip.mp4" | `generate.sh --output` | `bash generate.sh "prompt" --output /tmp/clip.mp4` |
 | "Animate this photo of a sunset" | `generate.sh --image` | `bash generate.sh "gentle waves, slow zoom" --image ./sunset.jpg` |
 
@@ -35,11 +34,10 @@ bash <skill-dir>/scripts/generate.sh "<prompt>" [OPTIONS]
 
 | Option | Default | Allowed values | Description |
 |--------|---------|----------------|-------------|
-| `--aspect RATIO` | `16:9` | `16:9`, `9:16` | Veo 3.1 supports landscape and portrait only. |
-| `--resolution RES` | `720p` | `720p`, `1080p`, `4k` | `1080p` and `4k` require `--duration 8`. |
-| `--duration SECS` | `8` | `4`, `6`, `8` | Sent as a string. Use `8` for the highest fidelity, for `1080p`/`4k`, or when `--image` is set. |
+| `--aspect RATIO` | API default (`16:9`) | `16:9`, `9:16` | Sent as `parameters.aspectRatio` when provided. |
+| `--resolution RES` | API default (`720p`) | `720p`, `1080p`, `4k` | Sent as `parameters.resolution` when provided. |
 | `--output PATH` | `./video_<timestamp>.mp4` | path | Output file path. |
-| `--image PATH` | (none) | `.png` / `.jpg` / `.webp` | Seed image. Base64-encoded into `instances[0].image.bytesBase64Encoded` (Vertex-AI image shape, **not** Gemini's `inlineData`). Veo uses it as the starting frame. |
+| `--image PATH` | (none) | `.png` / `.jpg` / `.webp` | Reference image. Base64-encoded and sent inside `instances[0].referenceImages[]` with `referenceType: "asset"`. |
 | `-h`, `--help` |  |  | Show usage. |
 
 ### Pinned Model
@@ -57,30 +55,45 @@ Audio is generated natively from the prompt — include speech in quotes (e.g. `
 3. Extract video — inline base64 `"data"` field or download from `"uri"`
 4. Save to output path
 
-### Request Parameters (Veo 3.1)
+### Request Body (Veo 3.1)
 
-The script sends:
+Plain text-to-video (no options set) — minimal body, matches the reference scripts:
+
+```json
+{
+  "instances": [{"prompt": "..."}]
+}
+```
+
+With `--aspect` and/or `--resolution`:
+
+```json
+{
+  "instances": [{"prompt": "..."}],
+  "parameters": {
+    "aspectRatio": "9:16",
+    "resolution": "1080p"
+  }
+}
+```
+
+With `--image` (image-to-video):
 
 ```json
 {
   "instances": [{
     "prompt": "...",
-    "image": {
-      "mimeType": "image/png",
-      "bytesBase64Encoded": "..."
-    }
-  }],
-  "parameters": {
-    "aspectRatio": "16:9",
-    "resolution": "720p",
-    "sampleCount": 1,
-    "durationSeconds": "8"
-  }
+    "referenceImages": [
+      {
+        "image": {"inlineData": {"mimeType": "image/png", "data": "<base64>"}},
+        "referenceType": "asset"
+      }
+    ]
+  }]
 }
 ```
 
-- `durationSeconds` is a **string** in Veo 3.1, not an integer.
-- The `image` object uses `bytesBase64Encoded` + `mimeType` (the Vertex-AI image shape). The Gemini multimodal `inlineData` / `data` field is **not** accepted by Veo and the API rejects it with `'inlineData' isn't supported by this model`.
+The `parameters` block is omitted when the user doesn't override defaults — this matches the reference scripts and avoids sending redundant fields.
 
 ## Output
 
@@ -102,7 +115,6 @@ Video saved to: ./video_20260512_194900.mp4 (model=veo-3.1-generate-preview)
 |-------|-------------|----------|
 | `providers.gemini.api_key not found` | API key missing | Add `providers.gemini.api_key` to config |
 | `HTTP 403` | Key lacks Veo access | Enable Veo on the project or use a key with Veo access |
-| `HTTP 400` w/ resolution + duration | `1080p`/`4k` requested with duration < 8 | Use `--duration 8` |
 | `HTTP 400` w/ personGeneration | Region (EU/UK/CH/MENA) restricts person generation | Reword the prompt to avoid recognizable people |
 | `timed out waiting` | Generation exceeded 10 min | Retry or simplify the prompt |
 | `could not extract video` | Unexpected response format | Check raw response in stderr |
@@ -125,9 +137,7 @@ providers:
 | Case | Handling |
 |------|----------|
 | Response has inline base64 `"data"` | Decoded directly to output file |
-| Response has `"uri"` instead of `"data"` | Downloaded via curl with API key header |
-| `--resolution 1080p` or `4k` with `--duration` < 8 | API returns 400; use default `--duration 8` |
-| `--image` set with `--duration` ≠ 8 | API may return 400; drop `--duration` to use default 8 |
+| Response has `"uri"` instead of `"data"` | Downloaded via curl with API key header (follows redirects) |
 | `--image` file unreadable / unknown extension | Caller error; fix path or convert to .png/.jpg/.webp |
 | `--aspect` other than `16:9`/`9:16` | Veo 3.1 does not support 1:1, 4:3, or 3:4 — API returns 400 |
 | Generated videos are stored server-side for 2 days | Download promptly; URI is short-lived |

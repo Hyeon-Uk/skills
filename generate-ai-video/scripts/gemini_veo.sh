@@ -3,11 +3,25 @@
 # Called by generate.sh; not meant to be invoked directly.
 #
 # Model is pinned to veo-3.1-generate-preview (audio is generated natively).
-# Per the Gemini API reference for Veo 3.1:
-#   - aspectRatio: "16:9" or "9:16"
-#   - resolution:  "720p" (default), "1080p", or "4k"
-#   - durationSeconds (string): "4", "6", or "8"
-#     ("8" is required for 1080p/4k and when reference/seed images are used)
+#
+# Request shape (matches the Gemini API reference scripts):
+#
+#   POST .../models/veo-3.1-generate-preview:predictLongRunning
+#   {
+#     "instances": [{
+#       "prompt": "...",
+#       "referenceImages": [           # only when --image is set
+#         {
+#           "image": {"inlineData": {"mimeType": "...", "data": "<base64>"}},
+#           "referenceType": "asset"
+#         }
+#       ]
+#     }],
+#     "parameters": {                  # only when --aspect or --resolution is set
+#       "aspectRatio": "16:9",
+#       "resolution":  "720p"
+#     }
+#   }
 #
 # Flow:
 #   1. POST :predictLongRunning  → {"name": "operations/..."}
@@ -26,9 +40,8 @@ ENDPOINT="https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:predi
 OPERATIONS_BASE="https://generativelanguage.googleapis.com/v1beta"
 
 CONFIG_FILE=""
-ASPECT="16:9"
-RESOLUTION="720p"
-DURATION="8"
+ASPECT=""
+RESOLUTION=""
 OUTPUT=""
 IMAGE=""
 PROMPT=""
@@ -38,7 +51,6 @@ while [ $# -gt 0 ]; do
         --config)     CONFIG_FILE="$2";   shift 2 ;;
         --aspect)     ASPECT="$2";        shift 2 ;;
         --resolution) RESOLUTION="$2";    shift 2 ;;
-        --duration)   DURATION="$2";      shift 2 ;;
         --output)     OUTPUT="$2";        shift 2 ;;
         --image)      IMAGE="$2";         shift 2 ;;
         --) shift; PROMPT="$*"; break ;;
@@ -77,6 +89,28 @@ detect_mime() {
     esac
 }
 
+# Build the optional "parameters" block. The reference scripts only send
+# this when the user actually overrides a parameter, so omit it when
+# both --aspect and --resolution are unset to keep the request minimal.
+build_parameters_block() {
+    local has_aspect=0 has_res=0 first=1
+    [ -n "$ASPECT" ]     && has_aspect=1
+    [ -n "$RESOLUTION" ] && has_res=1
+    if [ $has_aspect -eq 0 ] && [ $has_res -eq 0 ]; then
+        return
+    fi
+    printf ',\n  "parameters": {'
+    if [ $has_aspect -eq 1 ]; then
+        printf '\n    "aspectRatio": "%s"' "$ASPECT"
+        first=0
+    fi
+    if [ $has_res -eq 1 ]; then
+        [ $first -eq 0 ] && printf ','
+        printf '\n    "resolution": "%s"' "$RESOLUTION"
+    fi
+    printf '\n  }'
+}
+
 if [ -n "$IMAGE" ]; then
     if ! IMAGE_MIME="$(detect_mime "$IMAGE")"; then
         echo "gemini_veo.sh: could not determine image MIME type for $IMAGE (expected .png/.jpg/.jpeg/.webp)" >&2
@@ -88,46 +122,22 @@ if [ -n "$IMAGE" ]; then
     # output by default on some platforms — strip whitespace so the
     # JSON string stays on one line.
     #
-    # Wire format for Veo's predictLongRunning image is the Vertex
-    # AI shape (`bytesBase64Encoded` + `mimeType`), NOT Gemini's
-    # `inlineData` Part. The Gemini docs example uses `inlineData`
-    # but the API rejects it with "'inlineData' isn't supported by
-    # this model" — python-genai confirms `bytesBase64Encoded`.
+    # Wire format matches refer-to-image-video.sh: referenceImages[] with
+    # image.inlineData.{mimeType,data} and referenceType: "asset".
     {
-        cat <<EOF
-{
-  "instances": [{
-    "prompt": "$ESCAPED_PROMPT",
-    "image": {
-      "mimeType": "$IMAGE_MIME",
-EOF
-        printf '      "bytesBase64Encoded": "'
+        printf '{\n  "instances": [{\n    "prompt": "%s",\n    "referenceImages": [\n      {\n        "image": {"inlineData": {"mimeType": "%s", "data": "' \
+            "$ESCAPED_PROMPT" "$IMAGE_MIME"
         base64 < "$IMAGE" | tr -d '\n\r '
-        printf '"\n'
-        cat <<EOF
-    }
-  }],
-  "parameters": {
-    "aspectRatio": "$ASPECT",
-    "resolution": "$RESOLUTION",
-    "sampleCount": 1,
-    "durationSeconds": "$DURATION"
-  }
-}
-EOF
+        printf '"}},\n        "referenceType": "asset"\n      }\n    ]\n  }]'
+        build_parameters_block
+        printf '\n}\n'
     } > "$REQUEST_FILE"
 else
-    cat > "$REQUEST_FILE" <<EOF
-{
-  "instances": [{"prompt": "$ESCAPED_PROMPT"}],
-  "parameters": {
-    "aspectRatio": "$ASPECT",
-    "resolution": "$RESOLUTION",
-    "sampleCount": 1,
-    "durationSeconds": "$DURATION"
-  }
-}
-EOF
+    {
+        printf '{\n  "instances": [{"prompt": "%s"}]' "$ESCAPED_PROMPT"
+        build_parameters_block
+        printf '\n}\n'
+    } > "$REQUEST_FILE"
 fi
 
 if [ -n "$IMAGE" ]; then
@@ -221,7 +231,7 @@ else
     fi
 
     echo "Downloading video from URI…" >&2
-    HTTP_CODE="$(curl -sS -w '%{http_code}' -o "$OUTPUT" \
+    HTTP_CODE="$(curl -sSL -w '%{http_code}' -o "$OUTPUT" \
         "$VIDEO_URI" \
         -H "x-goog-api-key: $API_KEY")" || {
         echo "gemini_veo.sh: curl failed downloading video" >&2

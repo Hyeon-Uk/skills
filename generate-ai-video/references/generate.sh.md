@@ -14,14 +14,15 @@ bash generate.sh "<prompt>" [OPTIONS]
 
 | Option | Default | Allowed values | Description |
 |--------|---------|----------------|-------------|
-| `--aspect RATIO` | `16:9` | `16:9`, `9:16` | Veo 3.1 supports landscape and portrait only |
-| `--resolution RES` | `720p` | `720p`, `1080p`, `4k` | `1080p`/`4k` require `--duration 8` |
-| `--duration SECS` | `8` | `4`, `6`, `8` | Sent to the API as a string |
+| `--aspect RATIO` | API default (`16:9`) | `16:9`, `9:16` | Sent as `parameters.aspectRatio` when provided |
+| `--resolution RES` | API default (`720p`) | `720p`, `1080p`, `4k` | Sent as `parameters.resolution` when provided |
 | `--output PATH` | `./video_<timestamp>.mp4` | path | Output file path |
-| `--image PATH` | (none) | `.png`/`.jpg`/`.webp` | Seed image — base64-encoded and sent as `instances[0].image.inlineData` for image-to-video |
+| `--image PATH` | (none) | `.png`/`.jpg`/`.webp` | Reference image — base64-encoded and sent inside `instances[0].referenceImages[]` with `referenceType: "asset"` |
 | `-h`, `--help` |  |  | Show usage |
 
 There is no `--model` option — Veo 3.1 is pinned in `gemini_veo.sh`.
+
+When `--aspect` and `--resolution` are both omitted, the `parameters` object is omitted from the request body (matches the reference scripts).
 
 ## Exit Codes
 

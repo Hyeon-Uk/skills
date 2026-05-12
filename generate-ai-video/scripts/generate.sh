@@ -7,12 +7,10 @@
 # Usage:
 #   generate.sh "<prompt>" [--aspect 16:9|9:16]
 #               [--resolution 720p|1080p|4k]
-#               [--duration 4|6|8]
 #               [--output PATH] [--image PATH]
 #
 # --image PATH turns this into an image-to-video request: the file is
-# base64-encoded and sent as the seed/reference frame. When --image is
-# set, Veo currently requires --duration 8 (default).
+# base64-encoded and sent as a reference asset frame.
 #
 # Exit codes:
 #   0  success — final line of stdout is the absolute output path
@@ -26,9 +24,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/parse_yaml.sh"
 
 PROMPT=""
-ASPECT="16:9"
-RESOLUTION="720p"
-DURATION="8"
+ASPECT=""
+RESOLUTION=""
 OUTPUT=""
 IMAGE=""
 
@@ -36,11 +33,10 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --aspect)     ASPECT="${2:-}";     shift 2 ;;
         --resolution) RESOLUTION="${2:-}"; shift 2 ;;
-        --duration)   DURATION="${2:-}";   shift 2 ;;
         --output)     OUTPUT="${2:-}";     shift 2 ;;
         --image)      IMAGE="${2:-}";      shift 2 ;;
         --help|-h)
-            sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         --) shift; PROMPT="${1:-$PROMPT}"; shift || true ;;
@@ -51,7 +47,7 @@ done
 
 if [ -z "$PROMPT" ]; then
     echo "generate.sh: prompt is required" >&2
-    echo "Usage: generate.sh \"<prompt>\" [--aspect 16:9|9:16] [--resolution 720p|1080p|4k] [--duration 4|6|8] [--output PATH] [--image PATH]" >&2
+    echo "Usage: generate.sh \"<prompt>\" [--aspect 16:9|9:16] [--resolution 720p|1080p|4k] [--output PATH] [--image PATH]" >&2
     exit 1
 fi
 
@@ -72,9 +68,8 @@ fi
 
 exec bash "$SCRIPT_DIR/gemini_veo.sh" \
     --config     "$CONFIG_FILE" \
-    --aspect     "$ASPECT" \
-    --resolution "$RESOLUTION" \
-    --duration   "$DURATION" \
+    ${ASPECT:+--aspect "$ASPECT"} \
+    ${RESOLUTION:+--resolution "$RESOLUTION"} \
     --output     "$OUTPUT" \
     ${IMAGE:+--image "$IMAGE"} \
     -- "$PROMPT"
