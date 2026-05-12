@@ -87,20 +87,24 @@ if [ -n "$IMAGE" ]; then
     # images don't have to live in a shell variable. `base64` wraps
     # output by default on some platforms — strip whitespace so the
     # JSON string stays on one line.
+    #
+    # Wire format for Veo's predictLongRunning image is the Vertex
+    # AI shape (`bytesBase64Encoded` + `mimeType`), NOT Gemini's
+    # `inlineData` Part. The Gemini docs example uses `inlineData`
+    # but the API rejects it with "'inlineData' isn't supported by
+    # this model" — python-genai confirms `bytesBase64Encoded`.
     {
         cat <<EOF
 {
   "instances": [{
     "prompt": "$ESCAPED_PROMPT",
     "image": {
-      "inlineData": {
-        "mimeType": "$IMAGE_MIME",
+      "mimeType": "$IMAGE_MIME",
 EOF
-        printf '        "data": "'
+        printf '      "bytesBase64Encoded": "'
         base64 < "$IMAGE" | tr -d '\n\r '
         printf '"\n'
         cat <<EOF
-      }
     }
   }],
   "parameters": {

@@ -39,7 +39,7 @@ bash <skill-dir>/scripts/generate.sh "<prompt>" [OPTIONS]
 | `--resolution RES` | `720p` | `720p`, `1080p`, `4k` | `1080p` and `4k` require `--duration 8`. |
 | `--duration SECS` | `8` | `4`, `6`, `8` | Sent as a string. Use `8` for the highest fidelity, for `1080p`/`4k`, or when `--image` is set. |
 | `--output PATH` | `./video_<timestamp>.mp4` | path | Output file path. |
-| `--image PATH` | (none) | `.png` / `.jpg` / `.webp` | Seed image, base64-encoded into `instances[0].image.inlineData`. Veo uses it as the starting frame. |
+| `--image PATH` | (none) | `.png` / `.jpg` / `.webp` | Seed image. Base64-encoded into `instances[0].image.bytesBase64Encoded` (Vertex-AI image shape, **not** Gemini's `inlineData`). Veo uses it as the starting frame. |
 | `-h`, `--help` |  |  | Show usage. |
 
 ### Pinned Model
@@ -63,7 +63,13 @@ The script sends:
 
 ```json
 {
-  "instances": [{"prompt": "...", "image": { ... optional ... }}],
+  "instances": [{
+    "prompt": "...",
+    "image": {
+      "mimeType": "image/png",
+      "bytesBase64Encoded": "..."
+    }
+  }],
   "parameters": {
     "aspectRatio": "16:9",
     "resolution": "720p",
@@ -73,7 +79,8 @@ The script sends:
 }
 ```
 
-`durationSeconds` is a **string** in Veo 3.1, not an integer.
+- `durationSeconds` is a **string** in Veo 3.1, not an integer.
+- The `image` object uses `bytesBase64Encoded` + `mimeType` (the Vertex-AI image shape). The Gemini multimodal `inlineData` / `data` field is **not** accepted by Veo and the API rejects it with `'inlineData' isn't supported by this model`.
 
 ## Output
 
