@@ -12,7 +12,7 @@
 #       "prompt": "...",
 #       "referenceImages": [           # only when --image is set
 #         {
-#           "image": {"inlineData": {"mimeType": "...", "data": "<base64>"}},
+#           "image": {"bytesBase64Encoded": "<base64>", "mimeType": "..."},
 #           "referenceType": "asset"
 #         }
 #       ]
@@ -122,13 +122,15 @@ if [ -n "$IMAGE" ]; then
     # output by default on some platforms — strip whitespace so the
     # JSON string stays on one line.
     #
-    # Wire format matches refer-to-image-video.sh: referenceImages[] with
-    # image.inlineData.{mimeType,data} and referenceType: "asset".
+    # Wire format: referenceImages[] with image.{bytesBase64Encoded,mimeType}
+    # and referenceType: "asset". The public docs show inlineData here, but
+    # the predictLongRunning endpoint rejects it with "'inlineData' isn't
+    # supported by this model" — Veo uses the Vertex-AI image shape.
     {
-        printf '{\n  "instances": [{\n    "prompt": "%s",\n    "referenceImages": [\n      {\n        "image": {"inlineData": {"mimeType": "%s", "data": "' \
-            "$ESCAPED_PROMPT" "$IMAGE_MIME"
+        printf '{\n  "instances": [{\n    "prompt": "%s",\n    "referenceImages": [\n      {\n        "image": {"bytesBase64Encoded": "' \
+            "$ESCAPED_PROMPT"
         base64 < "$IMAGE" | tr -d '\n\r '
-        printf '"}},\n        "referenceType": "asset"\n      }\n    ]\n  }]'
+        printf '", "mimeType": "%s"},\n        "referenceType": "asset"\n      }\n    ]\n  }]' "$IMAGE_MIME"
         build_parameters_block
         printf '\n}\n'
     } > "$REQUEST_FILE"
@@ -225,6 +227,20 @@ else
         | head -1)"
 
     if [ -z "$VIDEO_URI" ]; then
+        # When `done: true` but neither data nor uri is present, the
+        # operation typically finished with the RAI safety filter
+        # blocking the output (e.g. celebrity-likeness or violence).
+        # Surface the filter reason verbatim so the user knows to
+        # adjust the prompt or reference image rather than just seeing
+        # a generic "could not extract" error.
+        RAI_REASON="$(tr -d '\n\r' < "$RESPONSE_FILE" \
+            | sed -n 's/.*"raiMediaFilteredReasons"[[:space:]]*:[[:space:]]*\[[[:space:]]*"\([^"]*\)".*/\1/p' \
+            | head -1)"
+        if [ -n "$RAI_REASON" ]; then
+            echo "gemini_veo.sh: video generation blocked by safety filter: $RAI_REASON" >&2
+            exit 1
+        fi
+
         echo "gemini_veo.sh: could not extract video data or URI from response" >&2
         cat "$RESPONSE_FILE" >&2
         exit 1

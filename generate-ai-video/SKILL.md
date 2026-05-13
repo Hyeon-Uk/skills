@@ -85,13 +85,15 @@ With `--image` (image-to-video):
     "prompt": "...",
     "referenceImages": [
       {
-        "image": {"inlineData": {"mimeType": "image/png", "data": "<base64>"}},
+        "image": {"bytesBase64Encoded": "<base64>", "mimeType": "image/png"},
         "referenceType": "asset"
       }
     ]
   }]
 }
 ```
+
+> **Note on wire format:** the public Veo REST docs show `image.inlineData.{mimeType,data}` for reference images, but `predictLongRunning` actually rejects that shape with `"inlineData" isn't supported by this model`. Veo uses the Vertex-AI image shape (`bytesBase64Encoded` + `mimeType` directly on `image`); the official `google-genai` SDK does the same. Don't "fix" this back to `inlineData`.
 
 The `parameters` block is omitted when the user doesn't override defaults — this matches the reference scripts and avoids sending redundant fields.
 
@@ -117,7 +119,8 @@ Video saved to: ./video_20260512_194900.mp4 (model=veo-3.1-generate-preview)
 | `HTTP 403` | Key lacks Veo access | Enable Veo on the project or use a key with Veo access |
 | `HTTP 400` w/ personGeneration | Region (EU/UK/CH/MENA) restricts person generation | Reword the prompt to avoid recognizable people |
 | `timed out waiting` | Generation exceeded 10 min | Retry or simplify the prompt |
-| `could not extract video` | Unexpected response format | Check raw response in stderr |
+| `blocked by safety filter: ...` | RAI rejected the prompt or reference image (e.g. celebrity likeness, violence) | Reword the prompt or swap out the reference image |
+| `could not extract video` | Unexpected response format (no `data`/`uri`/`raiMediaFilteredReasons`) | Check raw response in stderr |
 
 ## Config Schema
 
