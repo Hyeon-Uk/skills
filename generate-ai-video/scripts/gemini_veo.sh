@@ -164,18 +164,16 @@ if [ "$HTTP_CODE" != "200" ]; then
     exit 1
 fi
 
-# Extract the operation name with jq — the reference scripts
-# (refer-to-image-video.sh, text-to-video.sh, ...) do `jq -r .name`.
-# A sed regex over the raw body is fragile: a greedy `.*"name"` match
-# can latch onto the wrong "name" if any nested object or error
-# payload also contains that key, and any escaped quote inside the
-# value breaks the `[^"]*` capture. jq parses the JSON properly.
-if ! command -v jq >/dev/null 2>&1; then
-    echo "gemini_veo.sh: jq is required to parse the API response" >&2
-    exit 1
-fi
-
-OP_NAME="$(jq -r '.name // empty' < "$RESPONSE_FILE")"
+# Pull the operation name out of the response. A greedy sed match
+# (`.*"name"`) would latch onto the LAST "name" key, which is wrong
+# when the body has nested objects (metadata, errors) that also use
+# that key — that bug surfaced in practice and broke polling with a
+# malformed URL. `grep -o` emits one match per occurrence; `head -1`
+# picks the first, i.e. the top-level operation name.
+OP_NAME="$(tr -d '\n\r' < "$RESPONSE_FILE" \
+    | grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' \
+    | head -1 \
+    | sed 's/.*"\([^"]*\)"$/\1/')"
 
 if [ -z "$OP_NAME" ]; then
     echo "gemini_veo.sh: could not extract operation name from response" >&2
