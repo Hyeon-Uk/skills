@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # generate.sh — entry point for the generate-image skill.
-# Reads /home/owner/.carbon/config.yaml, picks the provider from
+# Reads {agent_config_path}/config.yaml, picks the provider from
 # defaults.provider, and dispatches.
 #
-# The carbon config does NOT carry an image model — it tracks the user's
+# The agent config does NOT carry an image model — it tracks the user's
 # chat-tier choice (e.g. defaults.model: light). Both provider scripts pin
 # their endpoint+model at static URLs:
 #   openai → gpt-image-1
@@ -21,7 +21,7 @@
 
 set -eu
 
-CONFIG_FILE="${CARBON_CONFIG:-/home/owner/.carbon/config.yaml}"
+CONFIG_FILE="${AGENT_CONFIG:-${AGENT_CONFIG_PATH:+${AGENT_CONFIG_PATH%/}/config.yaml}}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=parse_yaml.sh
 . "$SCRIPT_DIR/parse_yaml.sh"
@@ -58,7 +58,7 @@ fi
 
 if [ ! -r "$CONFIG_FILE" ]; then
     echo "generate.sh: cannot read config at $CONFIG_FILE" >&2
-    echo "Set CARBON_CONFIG to override the path, or create the file." >&2
+    echo "Set AGENT_CONFIG or AGENT_CONFIG_PATH to override the path, or create the file." >&2
     exit 1
 fi
 

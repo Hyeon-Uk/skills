@@ -35,7 +35,7 @@ When `--aspect` and `--resolution` are both omitted, the `parameters` object is 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CARBON_CONFIG` | `/home/owner/.carbon/config.yaml` | Path to config file |
+| `AGENT_CONFIG` | `{agent_config_path}/config.yaml` | Path to config file |
 
 ## Related Scripts
 

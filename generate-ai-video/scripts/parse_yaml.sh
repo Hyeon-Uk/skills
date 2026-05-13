@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# parse_yaml.sh — minimal YAML reader for the carbon config.
+# parse_yaml.sh — minimal YAML reader for the agent config.
 # Handles only what generate-image needs: top-level scalar fields and
 # one level of nesting (e.g. openai.api_key). No arrays, no anchors.
 #

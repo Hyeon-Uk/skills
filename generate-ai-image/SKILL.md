@@ -1,6 +1,6 @@
 ---
 name: generate-ai-image
-description: Generates images via OpenAI (gpt-image-1) or Google Gemini (gemini-3.1-flash-image-preview). Reads provider and API key from /home/owner/.carbon/config.yaml. Both providers are pinned to static endpoint+model. Pure shell + curl, no Python/Node required. Requires providers.<active-provider>.api_key in config.yaml. Trigger when the user asks to create, generate, draw, render, or make an image; mentions gpt-image, Gemini image, or text-to-image; or references their Carbon config provider. Returns an error if defaults.provider is anthropic (Anthropic has no image API).
+description: Generates images via OpenAI (gpt-image-1) or Google Gemini (gemini-3.1-flash-image-preview). Reads provider and API key from {agent_config_path}/config.yaml. Both providers are pinned to static endpoint+model. Pure shell + curl, no Python/Node required. Requires providers.<active-provider>.api_key in config.yaml. Trigger when the user asks to create, generate, draw, render, or make an image; mentions gpt-image, Gemini image, or text-to-image; or references their agent config provider. Returns an error if defaults.provider is anthropic (Anthropic has no image API).
 argument-hint: "[--quality LEVEL] [--output PATH] [--size WxH]"
 user-invocable: true
 allowed-tools: true
@@ -8,7 +8,7 @@ allowed-tools: true
 
 # generate-ai-image
 
-Generates an image from a text prompt using whichever provider is active in `/home/owner/.carbon/config.yaml`.
+Generates an image from a text prompt using whichever provider is active in `{agent_config_path}/config.yaml`.
 
 **Prerequisite:** The active provider's API key MUST exist in `config.yaml`:
 - `defaults.provider: openai` → `providers.openai.api_key` must be a valid OpenAI key (`sk-...`)
@@ -77,7 +77,7 @@ Error messages are written to stderr. Common errors:
 
 | Error | Description | Recovery Action |
 |-------|-------------|-----------------|
-| `cannot read config` | `config.yaml` missing or unreadable | Create config file at `/home/owner/.carbon/config.yaml` |
+| `cannot read config` | `config.yaml` missing or unreadable | Create config file at `{agent_config_path}/config.yaml` |
 | `defaults.provider missing` | No provider configured | Add `defaults.provider: openai\|gemini` to config |
 | `api_key missing` | Provider key not set | Add `providers.<name>.api_key` to config |
 | `provider 'anthropic' does not support image` | Anthropic has no image API | Switch to `openai` or `gemini` in config |
@@ -85,7 +85,7 @@ Error messages are written to stderr. Common errors:
 
 ## Config Schema
 
-`/home/owner/.carbon/config.yaml`:
+`{agent_config_path}/config.yaml`:
 
 ```yaml
 version: 1
@@ -107,7 +107,7 @@ The skill reads:
 - `defaults.provider` — for routing
 - `providers.<defaults.provider>.api_key` — for auth (mandatory)
 
-It deliberately **does not** read `defaults.model` (that's the chat tier in carbon's normal flow) and it deliberately **does not** read any `base_url` field — each provider script targets that provider's official endpoint only.
+It deliberately **does not** read `defaults.model` (that's the chat tier in agent's normal flow) and it deliberately **does not** read any `base_url` field — each provider script targets that provider's official endpoint only.
 
 ## Provider Routing
 

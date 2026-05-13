@@ -1,5 +1,5 @@
 # generate.sh (generate-ai-sound)
-**Description**: Entry point script for AI audio generation. Reads `/home/owner/.carbon/config.yaml`, determines the effective provider via smart routing (music always uses gemini, speech honors defaults.provider with fallback), and dispatches to the appropriate handler.
+**Description**: Entry point script for AI audio generation. Reads `{agent_config_path}/config.yaml`, determines the effective provider via smart routing (music always uses gemini, speech honors defaults.provider with fallback), and dispatches to the appropriate handler.
 **Depends on**: `curl` — for HTTP requests to OpenAI/Gemini APIs.
 
 ## Usage
@@ -49,7 +49,7 @@ bash generate.sh "<text or music prompt>" [OPTIONS]
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CARBON_CONFIG` | `/home/owner/.carbon/config.yaml` | Path to config file |
+| `AGENT_CONFIG` | `{agent_config_path}/config.yaml` | Path to config file |
 
 ## Examples
 

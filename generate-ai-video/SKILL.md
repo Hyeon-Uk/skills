@@ -1,6 +1,6 @@
 ---
 name: generate-ai-video
-description: Generates an MP4 video (with native audio — dialogue, SFX, ambience) from a text prompt and optionally a seed image, using Google Veo 3.1 (veo-3.1-generate-preview) via the Gemini API (predictLongRunning + polling). Supports image-to-video via --image PATH (PNG/JPEG/WebP), which Veo uses as a reference asset frame. Reads providers.gemini.api_key from /home/owner/.carbon/config.yaml. Pure shell + curl — no Python, Node, or ffmpeg required. Trigger when the user asks to create, make, generate, or render a video, short film, animated clip, image-to-video, animate-this-photo, talking-character clip, or any AI-generated video content. Always report the final video path.
+description: Generates an MP4 video (with native audio — dialogue, SFX, ambience) from a text prompt and optionally a seed image, using Google Veo 3.1 (veo-3.1-generate-preview) via the Gemini API (predictLongRunning + polling). Supports image-to-video via --image PATH (PNG/JPEG/WebP), which Veo uses as a reference asset frame. Reads providers.gemini.api_key from {agent_config_path}/config.yaml. Pure shell + curl — no Python, Node, or ffmpeg required. Trigger when the user asks to create, make, generate, or render a video, short film, animated clip, image-to-video, animate-this-photo, talking-character clip, or any AI-generated video content. Always report the final video path.
 argument-hint: "[--aspect 16:9|9:16] [--resolution 720p|1080p|4k] [--output PATH] [--image PATH]"
 user-invocable: true
 allowed-tools: true
@@ -10,7 +10,7 @@ allowed-tools: true
 
 Generates an MP4 video (with native audio) from a text prompt by calling the **Google Veo 3.1 API** (`veo-3.1-generate-preview`) via Gemini `predictLongRunning`, polling until the operation completes, then saving the result.
 
-**Prerequisite:** `providers.gemini.api_key` must be set in `/home/owner/.carbon/config.yaml`.
+**Prerequisite:** `providers.gemini.api_key` must be set in `{agent_config_path}/config.yaml`.
 
 ## Intent-Based Workflow
 
@@ -124,7 +124,7 @@ Video saved to: ./video_20260512_194900.mp4 (model=veo-3.1-generate-preview)
 
 ## Config Schema
 
-`/home/owner/.carbon/config.yaml`:
+`{agent_config_path}/config.yaml`:
 
 ```yaml
 version: 1

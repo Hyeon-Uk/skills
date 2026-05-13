@@ -1,5 +1,5 @@
 # generate.sh (generate-ai-image)
-**Description**: Entry point script for AI image generation. Reads `/home/owner/.carbon/config.yaml`, picks the provider from `defaults.provider`, and dispatches to the appropriate provider script.
+**Description**: Entry point script for AI image generation. Reads `{agent_config_path}/config.yaml`, picks the provider from `defaults.provider`, and dispatches to the appropriate provider script.
 **Depends on**: `curl` — for HTTP requests to OpenAI/Gemini APIs.
 
 ## Usage
@@ -37,7 +37,7 @@ bash generate.sh "<prompt>" [OPTIONS]
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CARBON_CONFIG` | `/home/owner/.carbon/config.yaml` | Path to config file |
+| `AGENT_CONFIG` | `{agent_config_path}/config.yaml` | Path to config file |
 
 ## Examples
 

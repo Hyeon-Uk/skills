@@ -1,6 +1,6 @@
 ---
 name: generate-ai-sound
-description: Generates audio from text — music (Google Gemini Lyria 3) or speech (OpenAI TTS, Gemini TTS). Reads API keys from /home/owner/.carbon/config.yaml. Provider is chosen by request type: music always routes to gemini (only Lyria supports music); speech prefers defaults.provider but auto-falls back to gemini or openai if the active provider is anthropic. All endpoints+models are pinned: openai speech → gpt-4o-mini-tts; gemini speech → gemini-3.1-flash-tts-preview; gemini music → lyria-3-pro-preview (--length full) or lyria-3-clip-preview (--length clip). Pure shell + curl, no Python/Node required. Trigger when the user asks to compose music, generate a song/jingle/tune/backing track, read text aloud, narrate, generate a voiceover, or synthesize speech. Always tell the user which provider was selected.
+description: Generates audio from text — music (Google Gemini Lyria 3) or speech (OpenAI TTS, Gemini TTS). Reads API keys from {agent_config_path}/config.yaml. Provider is chosen by request type: music always routes to gemini (only Lyria supports music); speech prefers defaults.provider but auto-falls back to gemini or openai if the active provider is anthropic. All endpoints+models are pinned: openai speech → gpt-4o-mini-tts; gemini speech → gemini-3.1-flash-tts-preview; gemini music → lyria-3-pro-preview (--length full) or lyria-3-clip-preview (--length clip). Pure shell + curl, no Python/Node required. Trigger when the user asks to compose music, generate a song/jingle/tune/backing track, read text aloud, narrate, generate a voiceover, or synthesize speech. Always tell the user which provider was selected.
 argument-hint: "[--mode music|speech] [--length clip|full] [--voice NAME] [--output PATH]"
 user-invocable: true
 allowed-tools: true
@@ -8,7 +8,7 @@ allowed-tools: true
 
 # generate-ai-sound
 
-Generates an audio file from a text input — either a music clip or spoken speech — choosing the **most appropriate provider for the request**, regardless of `defaults.provider` in `/home/owner/.carbon/config.yaml`.
+Generates an audio file from a text input — either a music clip or spoken speech — choosing the **most appropriate provider for the request**, regardless of `defaults.provider` in `{agent_config_path}/config.yaml`.
 
 **Prerequisite:** API keys must be configured in `config.yaml`:
 - **Music** requests always use `gemini` → `providers.gemini.api_key` must be a valid Google AI Studio key (`AIza...`)
@@ -90,7 +90,7 @@ Error messages are written to stderr. Common errors:
 
 | Error | Description | Recovery Action |
 |-------|-------------|-----------------|
-| `cannot read config` | `config.yaml` missing or unreadable | Create config file at `/home/owner/.carbon/config.yaml` |
+| `cannot read config` | `config.yaml` missing or unreadable | Create config file at `{agent_config_path}/config.yaml` |
 | `api_key missing` | Provider key not set | Add `providers.<name>.api_key` to config |
 | `Lyria copyright filter` | Prompt too close to copyrighted material | Rephrase using abstract mood/instruments/tempo |
 | `invalid voice` | Voice name not recognized | Use a valid voice from the list above |
@@ -107,7 +107,7 @@ Error messages are written to stderr. Common errors:
 
 ## Config Schema
 
-`/home/owner/.carbon/config.yaml`:
+`{agent_config_path}/config.yaml`:
 
 ```yaml
 version: 1
@@ -125,7 +125,7 @@ providers:
     api_key: "sk-ant-..."   # not used (anthropic has no audio API)
 ```
 
-The skill reads `defaults.provider` and `providers.<defaults.provider>.api_key`. It deliberately **does not** read `defaults.model` (that's the chat tier in carbon's normal flow) and it deliberately **does not** read any `base_url` field — each provider script targets that provider's official endpoint only.
+The skill reads `defaults.provider` and `providers.<defaults.provider>.api_key`. It deliberately **does not** read `defaults.model` (that's the chat tier in agent's normal flow) and it deliberately **does not** read any `base_url` field — each provider script targets that provider's official endpoint only.
 
 ## Edge Cases
 
