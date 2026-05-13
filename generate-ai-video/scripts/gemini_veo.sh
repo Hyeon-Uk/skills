@@ -164,9 +164,18 @@ if [ "$HTTP_CODE" != "200" ]; then
     exit 1
 fi
 
-OP_NAME="$(tr -d '\n\r' < "$RESPONSE_FILE" \
-    | sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
-    | head -1)"
+# Extract the operation name with jq — the reference scripts
+# (refer-to-image-video.sh, text-to-video.sh, ...) do `jq -r .name`.
+# A sed regex over the raw body is fragile: a greedy `.*"name"` match
+# can latch onto the wrong "name" if any nested object or error
+# payload also contains that key, and any escaped quote inside the
+# value breaks the `[^"]*` capture. jq parses the JSON properly.
+if ! command -v jq >/dev/null 2>&1; then
+    echo "gemini_veo.sh: jq is required to parse the API response" >&2
+    exit 1
+fi
+
+OP_NAME="$(jq -r '.name // empty' < "$RESPONSE_FILE")"
 
 if [ -z "$OP_NAME" ]; then
     echo "gemini_veo.sh: could not extract operation name from response" >&2
